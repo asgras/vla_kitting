@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# pytest
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ROS 2 build artifacts
+install/
+log/
+
+# ML artifacts
+*.ckpt
+*.pth
+*.pt
+*.h5
+*.onnx
+wandb/
+runs/
+outputs/
+checkpoints/
+
+# Data
+*.bag
+*.db3
+*.mcap
+datasets/
