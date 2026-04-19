@@ -127,7 +127,10 @@ class ActionsCfg:
             use_relative_mode=True,
             ik_method="dls",
         ),
-        scale=0.05,
+        # With scale=0.1, an action of 1.0 commands a 10 cm delta per control step
+        # (sim runs at 60 Hz after decimation=2 / dt=1/120). The scripted controller
+        # then effectively caps step size to 1-2 cm for stability.
+        scale=0.1,
     )
     gripper_action = BinaryJointPositionActionCfg(
         asset_name="robot",
@@ -172,14 +175,16 @@ class EventCfg:
         mode="reset",
     )
 
+    # Cube default spawn at (0.55, 0, 0.025). reset_root_state_uniform samples a DELTA
+    # from this default within the ranges below, so we stay within arm reach.
     randomize_cube_pose = EventTerm(
         func=mdp.reset_root_state_uniform,
         mode="reset",
         params={
             "pose_range": {
-                "x": (0.45, 0.65),
+                "x": (-0.08, 0.08),
                 "y": (-0.10, 0.10),
-                "z": (0.025, 0.025),
+                "z": (0.0, 0.0),
                 "yaw": (-0.5, 0.5),
             },
             "velocity_range": {},
