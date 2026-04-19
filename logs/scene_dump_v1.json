@@ -1,0 +1,318 @@
+{
+  "file": "/home/ubuntu/vla_kitting/assets/scene_cube_v1.usda",
+  "default_prim": "/World",
+  "prims": [
+    {
+      "path": "/World",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/base_link",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/base_link/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/base_link/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/base",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/base/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/base/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/joints",
+      "type": "Scope"
+    },
+    {
+      "path": "/World/Arm/root_joint/joints/base_link_base",
+      "type": "PhysicsFixedJoint"
+    },
+    {
+      "path": "/World/Arm/root_joint/joints/joint_1_s",
+      "type": "PhysicsRevoluteJoint"
+    },
+    {
+      "path": "/World/Arm/root_joint/joints/joint_2_l",
+      "type": "PhysicsRevoluteJoint"
+    },
+    {
+      "path": "/World/Arm/root_joint/joints/joint_3_u",
+      "type": "PhysicsRevoluteJoint"
+    },
+    {
+      "path": "/World/Arm/root_joint/joints/joint_4_r",
+      "type": "PhysicsRevoluteJoint"
+    },
+    {
+      "path": "/World/Arm/root_joint/joints/joint_5_b",
+      "type": "PhysicsRevoluteJoint"
+    },
+    {
+      "path": "/World/Arm/root_joint/joints/joint_6_t",
+      "type": "PhysicsRevoluteJoint"
+    },
+    {
+      "path": "/World/Arm/root_joint/joints/joint_6_t_tool0",
+      "type": "PhysicsFixedJoint"
+    },
+    {
+      "path": "/World/Arm/root_joint/link_1_s",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/link_1_s/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/link_1_s/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/link_2_l",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/link_2_l/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/link_2_l/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/link_3_u",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/link_3_u/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/link_3_u/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/link_4_r",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/link_4_r/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/link_4_r/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/link_5_b",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/link_5_b/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/link_5_b/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/link_6_t",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/link_6_t/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/link_6_t/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/tool0",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/tool0/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/tool0/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/World/Arm/root_joint/Looks",
+      "type": "Scope"
+    },
+    {
+      "path": "/World/Arm/root_joint/Looks/Yaskawa_white",
+      "type": "Material"
+    },
+    {
+      "path": "/World/Arm/root_joint/Looks/Yaskawa_white/Yaskawa_white",
+      "type": "Shader"
+    },
+    {
+      "path": "/World/Arm/root_joint/Looks/metallic",
+      "type": "Material"
+    },
+    {
+      "path": "/World/Arm/root_joint/Looks/metallic/metallic",
+      "type": "Shader"
+    },
+    {
+      "path": "/World/Arm/root_joint/Looks/material_2126BF",
+      "type": "Material"
+    },
+    {
+      "path": "/World/Arm/root_joint/Looks/material_2126BF/Shader",
+      "type": "Shader"
+    },
+    {
+      "path": "/World/Arm/root_joint/Looks/DefaultMaterial",
+      "type": "Material"
+    },
+    {
+      "path": "/World/Arm/root_joint/Looks/DefaultMaterial/DefaultMaterial",
+      "type": "Shader"
+    },
+    {
+      "path": "/World/Arm/root_joint/Looks/Yaskawa_blue",
+      "type": "Material"
+    },
+    {
+      "path": "/World/Arm/root_joint/Looks/Yaskawa_blue/Yaskawa_blue",
+      "type": "Shader"
+    },
+    {
+      "path": "/World/Arm/root_joint/Looks/Yaskawa_blue_0",
+      "type": "Material"
+    },
+    {
+      "path": "/World/Arm/root_joint/Looks/Yaskawa_blue_0/Yaskawa_blue",
+      "type": "Shader"
+    },
+    {
+      "path": "/World/Arm/root_joint/Looks/DefaultMaterial_0",
+      "type": "Material"
+    },
+    {
+      "path": "/World/Arm/root_joint/Looks/DefaultMaterial_0/DefaultMaterial",
+      "type": "Shader"
+    },
+    {
+      "path": "/World/Arm/root_joint/root_joint",
+      "type": "PhysicsFixedJoint"
+    },
+    {
+      "path": "/World/Table",
+      "type": "Cube"
+    },
+    {
+      "path": "/World/KeyLight",
+      "type": "DistantLight"
+    },
+    {
+      "path": "/World/Ambient",
+      "type": "DomeLight"
+    }
+  ],
+  "articulations": [
+    {
+      "path": "/World/Arm/root_joint/root_joint",
+      "type": "PhysicsFixedJoint"
+    }
+  ],
+  "joints": [
+    {
+      "path": "/World/Arm/root_joint/joints/joint_1_s",
+      "type": "PhysicsRevoluteJoint",
+      "name": "joint_1_s",
+      "lower": -180.0,
+      "upper": 180.0
+    },
+    {
+      "path": "/World/Arm/root_joint/joints/joint_2_l",
+      "type": "PhysicsRevoluteJoint",
+      "name": "joint_2_l",
+      "lower": -180.0,
+      "upper": 180.0
+    },
+    {
+      "path": "/World/Arm/root_joint/joints/joint_3_u",
+      "type": "PhysicsRevoluteJoint",
+      "name": "joint_3_u",
+      "lower": -4.999999523162842,
+      "upper": 355.0
+    },
+    {
+      "path": "/World/Arm/root_joint/joints/joint_4_r",
+      "type": "PhysicsRevoluteJoint",
+      "name": "joint_4_r",
+      "lower": -180.0,
+      "upper": 180.0
+    },
+    {
+      "path": "/World/Arm/root_joint/joints/joint_5_b",
+      "type": "PhysicsRevoluteJoint",
+      "name": "joint_5_b",
+      "lower": -180.0,
+      "upper": 180.0
+    },
+    {
+      "path": "/World/Arm/root_joint/joints/joint_6_t",
+      "type": "PhysicsRevoluteJoint",
+      "name": "joint_6_t",
+      "lower": -180.0,
+      "upper": 180.0
+    }
+  ],
+  "rigid_bodies": [
+    {
+      "path": "/World/Arm/root_joint/base_link"
+    },
+    {
+      "path": "/World/Arm/root_joint/base"
+    },
+    {
+      "path": "/World/Arm/root_joint/link_1_s"
+    },
+    {
+      "path": "/World/Arm/root_joint/link_2_l"
+    },
+    {
+      "path": "/World/Arm/root_joint/link_3_u"
+    },
+    {
+      "path": "/World/Arm/root_joint/link_4_r"
+    },
+    {
+      "path": "/World/Arm/root_joint/link_5_b"
+    },
+    {
+      "path": "/World/Arm/root_joint/link_6_t"
+    },
+    {
+      "path": "/World/Arm/root_joint/tool0"
+    }
+  ],
+  "revolute_count": 6
+}

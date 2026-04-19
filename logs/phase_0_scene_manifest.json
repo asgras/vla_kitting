@@ -1,0 +1,9 @@
+{
+  "status": "no_standalone_scene_at_kickoff",
+  "reason": "Existing kitting setup at ~/kitting_ws builds scene procedurally via setup_scene.py (xacro -> URDF -> Isaac importer). No usable standalone USD exists (~/hc10dt/*.usd are 492-byte stubs).",
+  "resolution": "Phase 3 builds V1 scene assets/scene_cube_v1.usd from ~/kitting_ws/src/kitting_description/urdf/hc10dt_kitting.urdf.xacro stripped to arm + table only (no bins/tray/Zivid). Cube spawned at env reset.",
+  "robot_urdf_source": "/home/ubuntu/kitting_ws/src/kitting_description/urdf/hc10dt_kitting.urdf.xacro",
+  "motoman_description_package": "/home/ubuntu/kitting_ws/install/motoman_description/share/motoman_description",
+  "expected_joint_names": ["joint_s", "joint_l", "joint_u", "joint_r", "joint_b", "joint_t"],
+  "expected_dof_count": 6
+}

@@ -1,0 +1,7 @@
+{
+  "current_phase": 6,
+  "completed": [0, 1, 2, 3, 4, 5],
+  "blocked_on": "Phase 6 teleop dry-run hangs in carb.tasking during first-time camera shader compile. Expected to resolve once a prior run has warmed shader cache. Phase 7 scripted demo will also warm caches.",
+  "last_update": "2026-04-19T02:40:00+00:00",
+  "notes": "Phase 5 complete: env registered, cameras produce non-zero images, 7D action space, all obs types verified. Key fixes: (a) disabled sim.use_fabric=False to avoid warp/fabric version mismatch on Isaac Sim 5.0, (b) corrected wrist_cam prim path to /Robot/root_joint/tool0/. Phase 6 code is ready (record_demos.py + replay_demos.py wrappers, teleop recipe in justfile), but in-process dry-run validation needs shader cache warmup. Recommend user runs Phase 6 teleop directly to validate end-to-end."
+}

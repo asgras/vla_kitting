@@ -1,0 +1,19 @@
+{
+  "date": "2026-04-19",
+  "captured_via": "pre-kickoff conversation with user (not the canned Phase 0 prompt)",
+  "scene_articulation_hc10dt": "confirmed via existing hc10dt_kitting.urdf.xacro in ~/kitting_ws",
+  "scene_has_table": "N/A — no existing scene; will be built in Phase 3",
+  "proceed": "yes",
+  "agreed_plan_adjustments": [
+    "Phase 2: use existing standalone Isaac Sim at /opt/IsaacSim/ (version 5.0.0-rc.45); install Isaac Lab via git clone, not pip",
+    "Phase 3: build minimal V1 scene assets/scene_cube_v1.usd from existing hc10dt_kitting.urdf.xacro (arm + table + cube, no bins/tray/Zivid)",
+    "Phase 6: prompt user for DCV DISPLAY at teleop time rather than upfront"
+  ],
+  "hf_token": "deferred to Phase 10 per plan",
+  "gpu_summary": {
+    "model": "NVIDIA L40S",
+    "vram_total_gib": 45,
+    "vram_free_gib_at_kickoff": 43,
+    "adequate_for_plan": true
+  }
+}

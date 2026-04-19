@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<!--
+  Minimal HC10DT xacro for the V1 VLA cube-pick scene.
+  Includes the bare arm macro only — no ros2_control (Isaac Sim provides physics),
+  no Zivid camera, no end-effector. Gripper attachment happens in Phase 4.
+-->
+<robot name="hc10dt_v1" xmlns:xacro="http://ros.org/wiki/xacro">
+  <xacro:include filename="$(find motoman_description)/robots/hc10dt_macro.xacro"/>
+  <xacro:motoman_hc10dt prefix=""/>
+</robot>

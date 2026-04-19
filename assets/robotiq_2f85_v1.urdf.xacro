@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<!--
+  Minimal Robotiq 2F-85 xacro for V1 VLA scene (no ros2_control; Isaac Sim handles drive).
+-->
+<robot xmlns:xacro="http://wiki.ros.org/xacro" name="robotiq_2f85_v1">
+    <xacro:include filename="$(find robotiq_description)/urdf/robotiq_2f_85_macro.urdf.xacro" />
+
+    <link name="world" />
+    <xacro:robotiq_gripper
+        name="robotiq_gripper"
+        prefix=""
+        parent="world"
+        include_ros2_control="false">
+        <origin xyz="0 0 0" rpy="0 0 0" />
+    </xacro:robotiq_gripper>
+</robot>

@@ -1,0 +1,32 @@
+[package]
+title = "Isaac Lab Python Headless + URDF Importer"
+
+[dependencies]
+"isaacsim.simulation_app" = {}
+"isaacsim.core.api" = {}
+"isaacsim.core.cloner" = {}
+"isaacsim.core.utils" = {}
+"isaacsim.core.version" = {}
+"isaacsim.core.nodes" = {}
+"isaacsim.core.simulation_manager" = {}
+"isaacsim.asset.importer.urdf" = {}
+"isaacsim.robot.schema" = {}
+"isaacsim.sensors.camera" = {}
+"isaacsim.sensors.physx" = {}
+
+[settings]
+app.livestream.enabled = false
+exts."omni.kit.viewport.window".startup.windowName = "Viewport"
+renderer.enabled = "pxr_usd"
+persistent.app.viewport.displayOptions = 131072
+
+[settings.app.renderer]
+skipWhileMinimized = true
+sleepMsOnFocus = 0
+sleepMsOutOfFocus = 0
+
+[settings.exts."omni.services.transport.server.http"]
+port = 0
+
+[settings.crashreporter]
+enabled = false

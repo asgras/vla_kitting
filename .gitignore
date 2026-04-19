@@ -48,3 +48,15 @@ checkpoints/
 *.db3
 *.mcap
 datasets/
+
+# VLA pipeline V1
+logs/*.log
+logs/*.mp4
+*.hdf5
+reports/rollouts/
+assets/*.usd
+assets/*.usda
+assets/*.usdc
+assets/configuration/
+# venv
+.venv/

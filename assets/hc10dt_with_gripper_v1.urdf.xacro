@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<!--
+  HC10DT + Robotiq 2F-85 attached to tool0 flange.
+  Single articulation for V1 VLA scene.
+
+  Robotiq 2F-85 base link is attached directly to the HC10DT tool0 (ISO 9409-1-50-4-M6
+  flange is the gripper's native mount — no adapter geometry needed).
+-->
+<robot name="hc10dt_with_gripper_v1" xmlns:xacro="http://ros.org/wiki/xacro">
+  <xacro:include filename="$(find motoman_description)/robots/hc10dt_macro.xacro"/>
+  <xacro:include filename="$(find robotiq_description)/urdf/robotiq_2f_85_macro.urdf.xacro"/>
+
+  <xacro:motoman_hc10dt prefix=""/>
+
+  <xacro:robotiq_gripper
+      name="robotiq_gripper"
+      prefix=""
+      parent="tool0"
+      include_ros2_control="false">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </xacro:robotiq_gripper>
+</robot>
