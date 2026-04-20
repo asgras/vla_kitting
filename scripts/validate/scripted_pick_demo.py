@@ -27,11 +27,12 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--num_demos", type=int, default=5)
 parser.add_argument("--dataset_file", type=str,
                     default=str(REPO / "datasets/teleop/cube_scripted.hdf5"))
-parser.add_argument("--max_steps_per_demo", type=int, default=500)
-parser.add_argument("--headless", action="store_true", default=True)
+parser.add_argument("--max_steps_per_demo", type=int, default=800)
+parser.add_argument("--gui", action="store_true", default=False,
+                    help="Run with Isaac Sim viewport visible (DCV display). Default is headless.")
 args_cli, _ = parser.parse_known_args()
 
-app_launcher = AppLauncher(headless=args_cli.headless, enable_cameras=True)
+app_launcher = AppLauncher(headless=not args_cli.gui, enable_cameras=True)
 sim_app = app_launcher.app
 
 
@@ -65,51 +66,104 @@ def _quat_from_downward_xy_yaw(yaw: float) -> "torch.Tensor":
     return torch.tensor([w, x, y, z])
 
 
-def _pose_delta(current: "torch.Tensor", target: "torch.Tensor") -> "torch.Tensor":
-    """Compute a pose delta in the IK-rel action space: 3D position delta + 3D axis-angle rot delta.
-
-    Inputs are (7,) tensors: (x, y, z, qw, qx, qy, qz).
-    Output is (6,) tensor: position_delta + axis_angle_rot_delta.
-
-    For this scripted demo we hold orientation roughly constant by just using
-    position deltas, leaving rotation delta at zero.
-    """
+def _quat_mul(a, b):
+    """Hamilton product of two quats in (w, x, y, z) form."""
     import torch
-    pos_delta = target[:3] - current[:3]
-    rot_delta = torch.zeros(3, device=current.device)
-    return torch.cat([pos_delta, rot_delta])
+    aw, ax, ay, az = a.unbind(-1)
+    bw, bx, by, bz = b.unbind(-1)
+    return torch.stack([
+        aw*bw - ax*bx - ay*by - az*bz,
+        aw*bx + ax*bw + ay*bz - az*by,
+        aw*by - ax*bz + ay*bw + az*bx,
+        aw*bz + ax*by - ay*bx + az*bw,
+    ], dim=-1)
+
+
+def _quat_conj(q):
+    import torch
+    w, x, y, z = q.unbind(-1)
+    return torch.stack([w, -x, -y, -z], dim=-1)
+
+
+def _quat_err_axis_angle(q_cur, q_des):
+    """Axis-angle (3,) representing the rotation from q_cur to q_des."""
+    import torch
+    q_err = _quat_mul(q_des, _quat_conj(q_cur))
+    # Shortest-path: flip if w < 0
+    if q_err[..., 0].item() < 0:
+        q_err = -q_err
+    w = q_err[..., 0].clamp(-1.0, 1.0)
+    angle = 2.0 * torch.acos(w)
+    sin_half = torch.sqrt((1.0 - w * w).clamp(min=1e-8))
+    axis = q_err[..., 1:] / sin_half
+    return axis * angle
 
 
 def script_trajectory_waypoints(cube_pos_w: "torch.Tensor") -> list[dict]:
-    """Generate the 6-phase scripted trajectory waypoints given privileged cube pose.
+    """Generate the scripted trajectory waypoints given privileged cube pose.
 
-    Returns a list of {ee_pos, gripper, steps} dicts.
+    Returns a list of {ee_pos, gripper, steps} dicts. All heights are for the
+    TOOL0 frame. Fingertip is +9.8 cm along tool0's local +Z axis (from URDF
+    chain tool0 -> base -> knuckle -> finger -> finger_tip at knuckle=0), so
+    when tool0 is oriented top-down the fingertip sits 9.8 cm below tool0 in
+    world Z. Table top is at z=0, cube spans z=[0, 0.05] (center 0.025).
+
+    Phase design: keep REORIENT and DESCEND strictly separate so the arm is
+    already fully top-down and XY-aligned before any vertical motion starts.
+    Otherwise the tilted fingertips sweep through the cube during phase 0.
     """
     import torch
-    cx, cy, cz = cube_pos_w.tolist()
+    cx, cy, _ = cube_pos_w.tolist()
 
-    # Heights below are for the TOOL0 frame (wrist, top of gripper).
-    # The Robotiq 2F-85 fingertips extend ~17cm below tool0. So tool0 at z=0.20
-    # puts fingertips at z=0.03 — around the cube center.
+    # Place target well away from the pick column so the success region is
+    # unambiguous.
     tx, ty = 0.65, 0.20
-    approach_h = 0.25  # hover well above
-    grasp_h = 0.12     # fingertips straddle the cube (tool0 -> fingertip ~11cm from URDF)
-    lift_h = 0.28      # lifts cube 15+ cm above table top
 
-    # BinaryJointPositionAction: actions < 0 => CLOSE, actions >= 0 => OPEN.
-    # So gripper = +1.0 means OPEN, -1.0 means CLOSE.
+    # The inner-knuckle collision mesh (STL bbox 5cm long in local +x and +z)
+    # is what actually grips the cube — the outer finger_tip_link converges to
+    # x≈±0.027 at full close which is just outside the cube's ±0.025 half-
+    # width. At full close (θ=0.8) the mesh spans base-frame z=[0.053, 0.126],
+    # so when tool0 is top-down the mesh spans world z = [tool0_z - 0.126,
+    # tool0_z - 0.053]. For the mesh to wrap cube sides (z=[0, 0.05]) we want
+    # tool0_z ≈ 0.13. But if we try to close the gripper while tool0 sits at
+    # 0.13, the rotating mesh drops below z=0 and the table blocks rotation —
+    # knuckle stalls at ≈0 rad (observed empirically).
+    #
+    # Fix: descend to grasp_h with gripper open, then issue close and lift
+    # commands simultaneously. As tool0 rises, the mesh clears the table so
+    # rotation can progress, and the fingers catch the cube on the way up.
+    #
+    #   approach_h = 0.35  -> fingertip at z≈0.25 (clear of cube)
+    #   grasp_h    = 0.130 -> outer fingertip at z=0.032 (beside cube lower
+    #                          half), inner-knuckle origin at z=0.069
+    #   lift_h     = 0.30  -> fingertip at z=0.20 (15 cm above table)
+    approach_h = 0.35
+    grasp_h = 0.130
+    lift_h = 0.30
+
+    # BinaryJointPositionAction: actions < 0 => CLOSE, >= 0 => OPEN. So
+    # gripper = +1.0 is OPEN, -1.0 is CLOSE.
     return [
-        # A: go above cube (open)
-        {"ee_pos": torch.tensor([cx, cy, approach_h]), "gripper": +1.0, "steps": 80},
-        # B: descend to grasp height (open)
-        {"ee_pos": torch.tensor([cx, cy, grasp_h]),    "gripper": +1.0, "steps": 60},
-        # C: close gripper in place (longer hold so it can finish closing)
-        {"ee_pos": torch.tensor([cx, cy, grasp_h]),    "gripper": -1.0, "steps": 80},
-        # D: lift (closed)
-        {"ee_pos": torch.tensor([cx, cy, lift_h]),     "gripper": -1.0, "steps": 50},
-        # E: transport to target (closed)
+        # A: rise/rotate to top-down above cube — the long phase that also
+        #    soaks up the ~45° home tilt. No descent below approach_h here.
+        {"ee_pos": torch.tensor([cx, cy, approach_h]), "gripper": +1.0, "steps": 140},
+        # B: settle at hover (kills residual XY drift before descent).
+        {"ee_pos": torch.tensor([cx, cy, approach_h]), "gripper": +1.0, "steps": 30},
+        # C: pure-vertical descent with gripper open — fingertips come to rest
+        #    beside the cube's lower half.
+        {"ee_pos": torch.tensor([cx, cy, grasp_h]),    "gripper": +1.0, "steps": 80},
+        # D: slow rise to a "close height" where the inner-knuckle mesh is
+        #    just clear of the table (so close can rotate) but still in the
+        #    upper half of the cube (so the mesh actually pinches it). Start
+        #    commanding close here — the close will catch up as tool0 rises.
+        {"ee_pos": torch.tensor([cx, cy, 0.16]),       "gripper": -1.0, "steps": 120},
+        # E: hold at close height while the close command finalizes its grip.
+        {"ee_pos": torch.tensor([cx, cy, 0.16]),       "gripper": -1.0, "steps": 80},
+        # F: lift with cube in hand.
+        {"ee_pos": torch.tensor([cx, cy, lift_h]),     "gripper": -1.0, "steps": 70},
+        # G: transport to the place target (stay closed).
         {"ee_pos": torch.tensor([tx, ty, lift_h]),     "gripper": -1.0, "steps": 120},
-        # F: hold at target (closed) — let success detector fire
+        # H: hold at target so the success detector can fire.
         {"ee_pos": torch.tensor([tx, ty, lift_h]),     "gripper": -1.0, "steps": 80},
     ]
 
@@ -165,9 +219,19 @@ def main() -> int:
 
         waypoints = script_trajectory_waypoints(cube_pos)
 
-        # Starting EE pose for diagnostics
+        # Target orientation: tool0 +Z pointing in world -Z (gripper fingers down).
+        # Built as the Hamilton product qz(yaw=0) * qx(π) → (0, 1, 0, 0) in (w,x,y,z).
+        # This is the canonical top-down pose used by kitting_ws for HC10DT picks.
+        q_target = _quat_from_downward_xy_yaw(0.0).to("cuda:0")
+
+        # Starting EE pose for diagnostics — report orientation error up-front so
+        # you can see how far the arm has to rotate to reach top-down.
         start_ee = obs["policy"]["ee_pose"][0]
-        _log(f"  start EE pos: ({start_ee[0]:.3f}, {start_ee[1]:.3f}, {start_ee[2]:.3f})")
+        start_ang_err = float(torch.linalg.vector_norm(
+            _quat_err_axis_angle(start_ee[3:7], q_target)
+        ))
+        _log(f"  start EE pos: ({start_ee[0]:.3f}, {start_ee[1]:.3f}, {start_ee[2]:.3f}) "
+             f"top-down ang_err={start_ang_err:.2f}rad")
 
         total_steps = 0
         success_step_count = 0
@@ -179,21 +243,43 @@ def main() -> int:
             phase_steps = wp["steps"]
 
             phase_start_ee = obs["policy"]["ee_pose"][0]
+            # Probe the actual left-knuckle joint angle AND the world-Z of the
+            # left inner-knuckle link (the body that carries the inner pad
+            # mesh in this URDF — the real gripping surface). If the inner
+            # pad drops near z=0 during close, the table blocks further
+            # closing.
+            robot = env.unwrapped.scene["robot"]
+            knuckle_idx = robot.joint_names.index("robotiq_85_left_knuckle_joint")
+            knuckle_q = float(robot.data.joint_pos[0, knuckle_idx])
+            inner_idx = robot.body_names.index("robotiq_85_left_inner_knuckle_link")
+            inner_z = float(robot.data.body_pos_w[0, inner_idx, 2])
+            fingertip_idx = robot.body_names.index("robotiq_85_left_finger_tip_link")
+            fingertip_z = float(robot.data.body_pos_w[0, fingertip_idx, 2])
             _log(f"  phase {phase_idx}: EE ({phase_start_ee[0]:.2f},{phase_start_ee[1]:.2f},{phase_start_ee[2]:.2f}) -> "
-                 f"target ({target_pos[0]:.2f},{target_pos[1]:.2f},{target_pos[2]:.2f}) grip={gripper_cmd}")
+                 f"target ({target_pos[0]:.2f},{target_pos[1]:.2f},{target_pos[2]:.2f}) "
+                 f"grip={gripper_cmd} knuckle={knuckle_q:.2f}rad "
+                 f"fingertip_z={fingertip_z:.3f} inner_z={inner_z:.3f}")
 
             for step in range(phase_steps):
                 if total_steps >= args_cli.max_steps_per_demo:
                     break
-                # Current EE position from policy obs (ee_pose is (N, 7))
+                # Current EE pose from policy obs (ee_pose is (N, 7) as x,y,z,qw,qx,qy,qz)
                 current_ee = obs["policy"]["ee_pose"][0]  # (7,)
                 cur_pos = current_ee[:3]
-                # Simple proportional controller in position, zero rotation delta
+                cur_quat = current_ee[3:7]
+
+                # Position: P-controller, saturates at 10 cm position error.
                 pos_err = target_pos - cur_pos
-                # Feed raw error directly; env scale=0.1 caps per-step motion to ~10 cm
-                # (the processed action = raw * 0.1). Clamp raw to [-1, 1] to avoid IK blowup.
                 pos_delta = torch.clamp(pos_err * 10.0, -1.0, 1.0)
-                rot_delta = torch.zeros(3, device="cuda:0")
+
+                # Orientation: drive the EE toward the top-down target every step.
+                # apply_delta_pose interprets action[3:6] as a world-frame axis-angle
+                # delta and premultiplies: q_new = q_delta * q_cur. So the correct
+                # command is axis_angle(q_target * q_cur^-1). Previously this was
+                # hard-zeroed, which is why the arm approached at its ~45° home tilt.
+                rot_err = _quat_err_axis_angle(cur_quat, q_target)
+                rot_delta = torch.clamp(rot_err * 3.0, -1.0, 1.0)
+
                 action = torch.zeros((1, 7), device="cuda:0")
                 action[0, :3] = pos_delta
                 action[0, 3:6] = rot_delta
@@ -205,9 +291,12 @@ def main() -> int:
                 # Diagnostic: at phase midpoint, report current vs target
                 if step == phase_steps // 2:
                     cur = obs["policy"]["ee_pose"][0, :3]
+                    cur_q = obs["policy"]["ee_pose"][0, 3:7]
+                    ang_err = float(torch.linalg.vector_norm(_quat_err_axis_angle(cur_q, q_target)))
                     cube_now = obs["policy"]["cube_pos"][0]
                     grip_closed = obs["policy"]["gripper_closed"][0]
                     _log(f"    phase {phase_idx} midway: EE ({cur[0]:.3f},{cur[1]:.3f},{cur[2]:.3f}) "
+                         f"ang_err={ang_err:.2f}rad "
                          f"cube ({cube_now[0]:.3f},{cube_now[1]:.3f},{cube_now[2]:.3f}) "
                          f"grip_closed={grip_closed[0]:.1f}")
 

@@ -35,13 +35,25 @@ build-combined:
 env-smoke:
     cd {{ISAAC_LAB}} && ./isaaclab.sh -p {{REPO}}/scripts/validate/env_smoke.py
 
+# ---------- Phase 7 ----------
+# Scripted pick demo in the Isaac Sim viewport (DCV). Use num=1 for visual debugging.
+scripted-pick-gui display="1" num="1":
+    DISPLAY=:{{display}} bash -c "cd {{ISAAC_LAB}} && ./isaaclab.sh -p {{REPO}}/scripts/validate/scripted_pick_demo.py \
+        --num_demos {{num}} \
+        --gui"
+
+# Headless scripted pick demo (for producing the actual dataset).
+scripted-pick num="15":
+    cd {{ISAAC_LAB}} && ./isaaclab.sh -p {{REPO}}/scripts/validate/scripted_pick_demo.py --num_demos {{num}}
+
 # ---------- Phase 6 ----------
 teleop display="1" num="15":
     DISPLAY=:{{display}} bash -c "cd {{ISAAC_LAB}} && ./isaaclab.sh -p {{REPO}}/scripts/teleop/record_demos.py \
         --task Isaac-PickCube-HC10DT-Robotiq-IK-Rel-v0 \
         --teleop_device keyboard \
         --dataset_file {{REPO}}/datasets/teleop/cube_raw.hdf5 \
-        --num_demos {{num}}"
+        --num_demos {{num}} \
+        --enable_cameras"
 
 teleop-dryrun:
     cd {{ISAAC_LAB}} && ./isaaclab.sh -p {{REPO}}/scripts/validate/teleop_dry_run.py

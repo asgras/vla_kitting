@@ -81,6 +81,43 @@ def main() -> int:
     else:
         print(f"[urdf2usd] ERROR: USD not produced at {args.usd}", file=sys.stderr)
         ok = False
+        kit.close()
+        return 1
+
+    # Post-import: the URDF importer strips position limits from joints marked
+    # <mimic>, but PhysX's mimic feature itself requires finite limits at runtime.
+    # Re-apply them directly on the USD's UsdPhysics.RevoluteJoint prims.
+    print(f"[urdf2usd] patching mimic-joint limits in {args.usd}", flush=True)
+    from pxr import Usd, UsdPhysics
+    stage = Usd.Stage.Open(str(args.usd))
+    # Limits follow each joint's URDF mimic multiplier (see robotiq_2f_85_macro):
+    #   right_knuckle, right_inner_knuckle, left_finger_tip  have mult=-1 → negative range
+    #   left_inner_knuckle, right_finger_tip                 have mult=+1 → positive range
+    mimic_joint_limits_deg = {
+        "robotiq_85_left_inner_knuckle_joint": (0.0, 48.7),     # mult=+1
+        "robotiq_85_right_inner_knuckle_joint": (-48.7, 0.0),   # mult=-1
+        "robotiq_85_left_finger_tip_joint": (-48.7, 0.0),       # mult=-1
+        "robotiq_85_right_finger_tip_joint": (0.0, 48.7),       # mult=+1
+        "robotiq_85_right_knuckle_joint": (-48.7, 0.0),         # mult=-1 (was already finite via URDF, harmless to re-set)
+    }
+    patched = 0
+    for prim in stage.Traverse():
+        if not prim.IsA(UsdPhysics.RevoluteJoint):
+            continue
+        name = prim.GetName()
+        if name not in mimic_joint_limits_deg:
+            continue
+        lo, hi = mimic_joint_limits_deg[name]
+        rj = UsdPhysics.RevoluteJoint(prim)
+        rj.CreateLowerLimitAttr().Set(lo)
+        rj.CreateUpperLimitAttr().Set(hi)
+        print(f"[urdf2usd]   set limits on {prim.GetPath()}: [{lo}, {hi}] deg", flush=True)
+        patched += 1
+    if patched == 0:
+        print(f"[urdf2usd] WARNING: no mimic joints found to patch", flush=True)
+    else:
+        stage.GetRootLayer().Save()
+        print(f"[urdf2usd] patched {patched} mimic joints and saved USD", flush=True)
 
     kit.close()
     return 0 if ok else 1

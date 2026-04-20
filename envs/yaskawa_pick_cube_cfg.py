@@ -132,11 +132,29 @@ class ActionsCfg:
         # then effectively caps step size to 1-2 cm for stability.
         scale=0.1,
     )
+    # Drive all 6 Robotiq revolute joints explicitly. The USD <mimic> tags are
+    # recorded but not enforced kinematically, so we emulate the mimic ties in
+    # the action: multipliers match the URDF (right/inner_right/left_finger_tip
+    # = -1 × left_knuckle; the others = +1 × left_knuckle).
     gripper_action = BinaryJointPositionActionCfg(
         asset_name="robot",
-        joint_names=["robotiq_85_left_knuckle_joint"],
-        open_command_expr={"robotiq_85_left_knuckle_joint": 0.0},
-        close_command_expr={"robotiq_85_left_knuckle_joint": 0.78},
+        joint_names=["robotiq_85_.*_joint"],
+        open_command_expr={
+            "robotiq_85_left_knuckle_joint": 0.0,
+            "robotiq_85_right_knuckle_joint": 0.0,
+            "robotiq_85_left_inner_knuckle_joint": 0.0,
+            "robotiq_85_right_inner_knuckle_joint": 0.0,
+            "robotiq_85_left_finger_tip_joint": 0.0,
+            "robotiq_85_right_finger_tip_joint": 0.0,
+        },
+        close_command_expr={
+            "robotiq_85_left_knuckle_joint": 0.78,
+            "robotiq_85_right_knuckle_joint": -0.78,
+            "robotiq_85_left_inner_knuckle_joint": 0.78,
+            "robotiq_85_right_inner_knuckle_joint": -0.78,
+            "robotiq_85_left_finger_tip_joint": -0.78,
+            "robotiq_85_right_finger_tip_joint": 0.78,
+        },
     )
 
 
@@ -219,19 +237,24 @@ class YaskawaPickCubeIkRelEnvCfg(ManagerBasedRLEnvCfg):
         self.episode_length_s = 30.0
         self.sim.dt = 1.0 / 120.0
         self.sim.render_interval = self.decimation
-        # Disable Fabric for xform pose queries: the bundled warp version's fabric kernel
-        # compilation fails (wp.transform_compose missing) on Isaac Sim 5.0.0-rc.45. The
-        # USD pose path is used when use_fabric=False.
-        self.sim.use_fabric = False
+        # Fabric ON: required for the RTX viewport to show physics updates (the
+        # Fabric Scene Delegate reads transforms from Fabric, not USD). The missing
+        # wp.transform_compose in the bundled omni.warp.core-1.7.1 is worked around
+        # by symlinking the extension's warp subdir to the newer pip warp (1.12.1)
+        # at /opt/IsaacSim/extscache/omni.warp.core-1.7.1+lx64/warp. Backup at warp.bak.
+        self.sim.use_fabric = True
         self.viewer.eye = (1.5, 1.0, 1.2)
         self.viewer.lookat = (0.55, 0.0, 0.05)
 
-        # Keyboard teleop
+        # Keyboard teleop. pos/rot_sensitivity are the per-press delta that multiplies
+        # the IK action scale (0.1) each control step. 0.3 * 0.1 = 3 cm of commanded
+        # target motion per step → ~0.9 m/s when holding — strong enough to dominate
+        # the small free-run IK target drift seen in the current env.
         self.teleop_devices = DevicesCfg(
             devices={
                 "keyboard": Se3KeyboardCfg(
-                    pos_sensitivity=0.05,
-                    rot_sensitivity=0.05,
+                    pos_sensitivity=0.3,
+                    rot_sensitivity=0.5,
                     sim_device=self.sim.device,
                 ),
             }
