@@ -110,11 +110,14 @@ PICK_GRASP_Z    = 0.17    # tool0 at grasp (pad ~0.03, cube-center height)
 # Transport height. 0.50 puts the HC10DT near full arm extension and the
 # differential-IK controller hits a singularity mid-swing (observed: EE
 # snapped 17 cm backward at phase 6 ~70%, flinging the cube). 0.40 keeps
-# the arm more bent — pad still sits 26 cm above the table (well above the
-# 10 cm success threshold).
+# the arm more bent — pad still sits 26 cm above the table.
 LIFT_Z          = 0.40
-PLACE_XY        = (0.65, 0.20)  # success target
-PLACE_APPROACH_Z = 0.40
+PLACE_XY        = (0.65, 0.20)  # output location (cube is RELEASED here)
+# Placement descent height. tool0_z=0.18 puts the pad at z≈0.04 — close to
+# resting-cube top (z=0.05) so the release is a gentle ~1-2 cm drop instead
+# of a fling. Higher than PICK_GRASP_Z (0.17) because we want clearance once
+# the fingers open.
+PLACE_Z         = 0.18
 
 # Asymmetric-mimic-chain compensation. The PhysxMimicJointAPI on the RIA
 # 2F-85 closes one finger ~18 mm ahead of the other when driven from rest,
@@ -138,15 +141,20 @@ def script_trajectory_waypoints(cube_pos_w: "torch.Tensor") -> list[dict]:
     pose during that phase (needed for approach/descent alignment, MUST be
     False once the gripper has contacted the cube).
 
-    Phase budget (total 1190 @ 60 Hz ≈ 20 s per demo):
-      A approach+reorient    140  TRACK   above cube, rotate to top-down
-      B hover settle          30  TRACK   kill residual drift
-      C slow descent         200  TRACK   straight down to grasp
-      D settle at grasp       40  --      let cube rest under open pads
-      E close gripper        180  --      pinch, EE frozen
-      F lift straight up     180  --      pure +Z to LIFT_Z
-      G transport to place   300  --      smooth XY swing above target
-      H hold at place        120  --      success detector needs 10 sustained
+    Phases (total ~1660 @ 60 Hz ≈ 28 s per demo):
+      A  approach+reorient   140  TRACK   above cube, rotate to top-down
+      B  hover settle         30  TRACK   kill residual drift
+      C  slow descent        200  TRACK   straight down to grasp
+      D  settle at grasp      40  --      let cube rest under open pads
+      E  close gripper       180  --      pinch, EE frozen
+      F  lift straight up    180  --      pure +Z to LIFT_Z
+      G1 transport leg 1     200  --      first 1/3 of Cartesian path
+      G2 transport leg 2     200  --      second 1/3
+      G3 transport leg 3     200  --      last 1/3, arriving over PLACE_XY
+      H  hover above place    60  --      settle at LIFT_Z over output
+      I  descend to place    150  --      pads lower toward table
+      J  release              80  --      open gripper, cube drops
+      K  retreat up           80  --      lift EE clear, let cube settle
     """
     import torch
     cx, cy, _ = cube_pos_w.tolist()
@@ -184,8 +192,16 @@ def script_trajectory_waypoints(cube_pos_w: "torch.Tensor") -> list[dict]:
         {"ee_pos": torch.tensor([cx + (tx - cx) * 0.66, cy + (ty - cy) * 0.66 + GRIP_BIAS_Y, LIFT_Z]),
          "gripper": -1.0, "steps": 200, "track": False},
         {"ee_pos": torch.tensor([tx, ty, LIFT_Z]),          "gripper": -1.0, "steps": 200, "track": False},
-        # H: hold at place target so success detector fires.
-        {"ee_pos": torch.tensor([tx, ty, LIFT_Z]),          "gripper": -1.0, "steps": 120, "track": False},
+        # H: settle above the output location before descending.
+        {"ee_pos": torch.tensor([tx, ty, LIFT_Z]),          "gripper": -1.0, "steps": 60,  "track": False},
+        # I: descend toward the placement height (pad ends ~4 cm over table).
+        {"ee_pos": torch.tensor([tx, ty, PLACE_Z]),         "gripper": -1.0, "steps": 150, "track": False},
+        # J: RELEASE — open the fingers, cube drops the last 1-2 cm and settles.
+        {"ee_pos": torch.tensor([tx, ty, PLACE_Z]),         "gripper": +1.0, "steps": 80,  "track": False},
+        # K: retreat back up, giving the cube clearance to settle fully. The
+        #    success term (cube_placed_at_target) fires once cube is near-stationary
+        #    at z<0.05 within xy_tolerance of the target.
+        {"ee_pos": torch.tensor([tx, ty, LIFT_Z]),          "gripper": +1.0, "steps": 80,  "track": False},
     ]
 
 

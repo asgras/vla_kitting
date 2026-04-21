@@ -46,6 +46,46 @@ scripted-pick-gui display="1" num="1":
 scripted-pick num="15":
     cd {{ISAAC_LAB}} && ./isaaclab.sh -p {{REPO}}/scripts/validate/scripted_pick_demo.py --num_demos {{num}}
 
+camera-samples n="5":
+    cd {{ISAAC_LAB}} && ./isaaclab.sh -p {{REPO}}/scripts/validate/save_camera_samples.py --samples {{n}}
+
+# ---------- Phase 8-9 (Mimic) ----------
+# Annotate the scripted seed demos with subtask boundaries. Writes
+# cube_annotated.hdf5 that Mimic's generator reads from.
+mimic-annotate src="datasets/teleop/cube_scripted.hdf5" out="datasets/teleop/cube_annotated.hdf5":
+    cd {{ISAAC_LAB}} && ./isaaclab.sh -p {{REPO}}/scripts/data/annotate_demos.py \
+        --task Isaac-PickCube-HC10DT-Robotiq-IK-Rel-Mimic-v0 \
+        --input_file {{REPO}}/{{src}} \
+        --output_file {{REPO}}/{{out}} \
+        --auto \
+        --headless \
+        --enable_cameras
+
+# Generate synthetic demos via Mimic. Default 100 (bump with num= once verified).
+mimic-generate src="datasets/teleop/cube_annotated.hdf5" out="datasets/mimic/cube_mimic.hdf5" num="100" envs="1":
+    cd {{ISAAC_LAB}} && ./isaaclab.sh -p {{REPO}}/scripts/data/generate_dataset.py \
+        --task Isaac-PickCube-HC10DT-Robotiq-IK-Rel-Mimic-v0 \
+        --input_file {{REPO}}/{{src}} \
+        --output_file {{REPO}}/{{out}} \
+        --generation_num_trials {{num}} \
+        --num_envs {{envs}} \
+        --headless \
+        --enable_cameras
+
+# Inspect an Isaac Lab HDF5 dataset (demo count, lengths, action ranges, obs keys).
+inspect-demos path="datasets/teleop/cube_scripted.hdf5":
+    {{ISAAC_PY}} {{REPO}}/scripts/data/inspect_demos.py {{REPO}}/{{path}}
+
+# ---------- Phase 10 (LeRobot conversion) ----------
+# Convert Isaac Lab HDF5 -> LeRobot v3 dataset for SmolVLA training.
+to-lerobot src="datasets/mimic/cube_mimic.hdf5" out="datasets/lerobot/cube_pick_v1" repo="vla_kitting/cube_pick_v1":
+    PYTHONPATH=/home/ubuntu/code/lerobot/src:$PYTHONPATH \
+      {{REPO}}/.venv/bin/python {{REPO}}/scripts/data/isaaclab_to_lerobot.py \
+        --input {{REPO}}/{{src}} \
+        --output {{REPO}}/{{out}} \
+        --repo_id {{repo}} \
+        --task "pick up the cube and place it on the green target"
+
 # ---------- Phase 6 ----------
 teleop display="1" num="15":
     DISPLAY=:{{display}} bash -c "cd {{ISAAC_LAB}} && ./isaaclab.sh -p {{REPO}}/scripts/teleop/record_demos.py \

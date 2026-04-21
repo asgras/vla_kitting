@@ -6,10 +6,18 @@ gymnasium registry when imported.
 import gymnasium as gym
 
 from .yaskawa_pick_cube_cfg import YaskawaPickCubeIkRelEnvCfg
+from .yaskawa_pick_cube_mimic_env_cfg import YaskawaPickCubeIkRelMimicEnvCfg
 
 gym.register(
     id="Isaac-PickCube-HC10DT-Robotiq-IK-Rel-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={"env_cfg_entry_point": YaskawaPickCubeIkRelEnvCfg},
+)
+
+gym.register(
+    id="Isaac-PickCube-HC10DT-Robotiq-IK-Rel-Mimic-v0",
+    entry_point="envs.yaskawa_pick_cube_mimic_env:YaskawaPickCubeIkRelMimicEnv",
+    disable_env_checker=True,
+    kwargs={"env_cfg_entry_point": YaskawaPickCubeIkRelMimicEnvCfg},
 )

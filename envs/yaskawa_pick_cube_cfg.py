@@ -57,6 +57,27 @@ class PickCubeSceneCfg(InteractiveSceneCfg):
         ),
     )
 
+    # Target marker: bright-green 10×10 cm square placed flush with the table
+    # surface at PLACE_XY=(0.65, 0.20). Visual-only (no collision, no rigid
+    # body) so the cube rests directly on the table without climbing the mat.
+    # The VLA needs this pixel cue to ground "the output location" — without
+    # it the policy would have to memorize world coordinates.
+    # Target marker: 20×20 cm, 1 cm thick, pure magenta. Magenta is the one
+    # color empirically confirmed to render correctly on this static asset
+    # path (green/cyan/emissive variants rendered in the cube's color due to
+    # scene-replication material sharing). Outside the cube-color palette,
+    # so the VLA can unambiguously ground "place it on the target".
+    target_marker = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/TargetMarker",
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.65, 0.20, 0.005)),
+        spawn=CuboidCfg(
+            size=(0.20, 0.20, 0.010),
+            visual_material=PreviewSurfaceCfg(
+                diffuse_color=(1.0, 0.0, 1.0),
+            ),
+        ),
+    )
+
     # Wrist camera attached to the tool0 flange. The URDF importer nests bodies under
     # /Robot/root_joint/<link_name>/ rather than /Robot/<link_name>/.
     wrist_cam = CameraCfg(
@@ -200,25 +221,24 @@ class EventCfg:
         mode="reset",
     )
 
-    # Cube default spawn at (0.55, 0, 0.025). reset_root_state_uniform samples a DELTA
-    # from this default within the ranges below, so we stay within arm reach.
+    # Cube default spawn at (0.55, 0, 0.025). reset_root_state_uniform samples
+    # a DELTA from this default within the ranges below. Widened from the
+    # original (±0.08, ±0.10) to give Mimic a more diverse seed distribution —
+    # still well inside arm reach and inside the camera framing.
     randomize_cube_pose = EventTerm(
         func=mdp.reset_root_state_uniform,
         mode="reset",
         params={
             "pose_range": {
-                "x": (-0.08, 0.08),
-                "y": (-0.10, 0.10),
+                "x": (-0.10, 0.10),   # sampled cube X ∈ [0.45, 0.65]
+                "y": (-0.13, 0.13),   # sampled cube Y ∈ [-0.13, 0.13]
                 "z": (0.0, 0.0),
-                # Yaw randomization disabled for Phase 7 scripted pick. With
-                # ±0.5 rad yaw (±28°), the 50 mm cube corners (diag 70.7 mm)
-                # stuck out past the 2F-85 finger knuckles' X extent (~35 mm
-                # from tool0), so during the top-down descent the open pads
-                # clipped the rotated cube and bumped it 5-20 mm sideways
-                # before the close command. The scripted controller reads
-                # cube_pos but not cube_rot; re-enable yaw randomization only
-                # once the scripted controller aligns gripper yaw to cube yaw
-                # (or the teleop operator does so manually).
+                # Yaw randomization still disabled. With ±0.5 rad yaw, the
+                # 50 mm cube's 70.7 mm diagonal clips the 2F-85 finger knuckles
+                # during descent and bumps the cube sideways. Our scripted
+                # controller reads cube_pos but not cube_rot, so it can't
+                # align the gripper yaw. Re-enable once we teach the scripted
+                # grasp to read cube_rot (or move to teleop).
                 "yaw": (0.0, 0.0),
             },
             "velocity_range": {},
@@ -226,12 +246,27 @@ class EventCfg:
         },
     )
 
+    # Visual randomization so Mimic data isn't a sea of identical red-cube frames.
+    randomize_cube_color = EventTerm(
+        func=mdp.randomize_cube_color,
+        mode="reset",
+        params={"asset_cfg": SceneEntityCfg("cube")},
+    )
+    randomize_light = EventTerm(
+        func=mdp.randomize_dome_light_intensity,
+        mode="reset",
+        params={"prim_path": "/World/Light", "intensity_range": (1800.0, 3200.0)},
+    )
+
 
 # ---------------------------------------------------------- terminations ---
 @configclass
 class TerminationsCfg:
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
-    success = DoneTerm(func=mdp.cube_lifted_over_target)
+    # Success = cube released and settled at the output location, not just
+    # transported above it. This means the scripted demo (and, later, the
+    # learned policy) must actually PLACE the cube before the episode ends.
+    success = DoneTerm(func=mdp.cube_placed_at_target)
 
 
 # ----------------------------------------------------------------- env cfg ---
