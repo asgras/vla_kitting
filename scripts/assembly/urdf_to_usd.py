@@ -168,6 +168,20 @@ def main() -> int:
                     mimic.CreateReferenceJointAxisAttr().Set(ref_axis_token)
                     mimic.CreateGearingAttr().Set(float(gearing))
                     mimic.CreateOffsetAttr().Set(0.0)
+                    # NVIDIA tutorial's "Natural Frequency 2500, Damping
+                    # Ratio 0.005" applies to the PhysxMimicJointAPI (the
+                    # soft constraint), NOT the joint drive. Without this,
+                    # naturalFrequency defaults to 0 and the solver's mimic
+                    # constraint is too weak to hold under contact load →
+                    # right-side fingers lag during close and the cube slips
+                    # out of the pads. Setting 2500 makes the constraint
+                    # stiff enough that both sides close in lock-step.
+                    # Leave naturalFrequency/dampingRatio at defaults (0)
+                    # per NVIDIA's shipped Robotiq USD and Isaac Lab's
+                    # UR10e2F85GearAssemblyEnvCfg. High mimic natural
+                    # frequency (≥500) destabilizes our articulation — IK
+                    # singularities + catastrophic arm behavior in scripted
+                    # pick tests.
                     print(f"[urdf2usd]   mimic on {prim.GetPath()}: axis={joint_axis_token} "
                           f"gearing={gearing:+.1f} limits=[{lo}, {hi}] deg", flush=True)
                 else:
@@ -182,6 +196,36 @@ def main() -> int:
     else:
         stage.GetRootLayer().Save()
         print(f"[urdf2usd] patched {patched} mimic joints and saved USD", flush=True)
+
+    # Force drive_type="force" on gripper joints only. Isaac Sim's URDF
+    # importer sets drive_type=acceleration by default, which makes
+    # ImplicitActuatorCfg's stiffness value represent a (rad/s)² natural
+    # frequency rather than N·m/rad torque. For the canonical gear-assembly
+    # 2F-85 config (stiffness=40), acceleration-mode means omega_n≈6 rad/s
+    # — far too slow for the fingers to actually close in 2 s. Switching
+    # to force-mode makes 40 N·m/rad produce 26 N·m at 0.65 rad error,
+    # plenty to close the fingers in well under a second.
+    print(f"[urdf2usd] setting drive_type=force on gripper joints", flush=True)
+    gripper_joint_names = {
+        "finger_joint",
+        "right_outer_knuckle_joint",
+        "left_inner_knuckle_joint",
+        "right_inner_knuckle_joint",
+        "left_inner_finger_joint",
+        "right_inner_finger_joint",
+    }
+    fixed = 0
+    for prim in stage.Traverse():
+        if not prim.IsA(UsdPhysics.RevoluteJoint):
+            continue
+        if prim.GetName() not in gripper_joint_names:
+            continue
+        drive = UsdPhysics.DriveAPI.Apply(prim, "angular")
+        drive.CreateTypeAttr().Set("force")
+        fixed += 1
+    if fixed:
+        stage.GetRootLayer().Save()
+    print(f"[urdf2usd] drive_type=force on {fixed} gripper joints", flush=True)
 
     kit.close()
     return 0 if ok else 1

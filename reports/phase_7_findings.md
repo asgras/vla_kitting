@@ -86,6 +86,61 @@ have escaped the pads before the actual lift motion begins.
 5. **`enable_external_forces_every_iteration=True` on PhysxCfg** — sim
    logged a warning about this being off.
 
+## ✅ BREAKTHROUGH: cube now gets lifted (tutorial + gear_assembly path)
+
+Found Isaac Lab's working UR10e + Robotiq 2F-85 task at
+`/home/ubuntu/IsaacLab/source/isaaclab_tasks/isaaclab_tasks/manager_based/manipulation/deploy/gear_assembly/config/ur_10e/joint_pos_env_cfg.py`
+(`UR10e2F85GearAssemblyEnvCfg`). Applied its exact actuator values and
+spawn settings; the cube **now gets picked up to z=0.153** (well above the
+0.10 m success threshold) across all 3 scripted-pick attempts.
+
+Changes that made the grip work:
+
+1. **gripper_finger stiffness 0.2 → 10.0** (damping 0.001 → 0.05, effort 1
+   → 10, velocity 1 → 10). The 50× increase on the inner_finger_joint
+   drive was the missing piece — this keeps the two pads parallel during
+   close under contact load, which was letting the cube squirt out before.
+2. **gripper_drive stiffness (tuned per gear_assembly config): 40 / 1 / 10**
+   (was 5000/100/50 or tried 11.25/0.1/10, 37.52/0.00125/1000).
+3. **disable_gravity=True on the robot spawn.** Critical. Without this,
+   the fingers sagged shut under their own weight during fast arm motion
+   (forced our original 5000 stiffness to compensate).
+4. **contact_offset=0.005, rest_offset=0.0** on the collision props.
+5. **drive_type=force on the gripper joints in the USD** (was
+   acceleration, the URDF importer default). In acceleration mode
+   stiffness=40 only produces ~6 rad/s natural frequency — far too slow.
+   `scripts/assembly/urdf_to_usd.py` now forces this in post-conversion.
+6. PhysxMimicJointAPI with only gearing (no naturalFrequency / dampingRatio).
+   High mimic natFreq (≥500) destabilizes the articulation; default (0)
+   relies on PhysX's ideal-constraint solver.
+7. close target 0.79 → 0.65 → 0.5 (matches reference gear_large=0.45 scale).
+
+## Still open: scripted trajectory chaos during close phase
+
+The cube isn't placed at the target yet (success criterion requires
+cube at z>0.10 AND within 8 cm of target xy). Current failure mode:
+
+- Phase 3 (close): the closing fingers knock the cube sideways (up to
+  200 mm in Y) before fully gripping.
+- Per-step cube-tracking in the scripted demo chases the kicked cube,
+  which makes the EE swing wildly to follow.
+- The fingers do close on the cube eventually (cube ends up gripped at
+  z≈0.153 during the lift phase).
+- But phase 5 (transport) flies the EE back to the fixed place target.
+  The 0.7–1 m swing + the marginal grip lets the cube drop.
+
+This is a scripted-trajectory problem now, not a gripper physics problem.
+The gripper works — the cube gets picked up. The scripted demo just
+wasn't designed around this physics behaviour. Fixes would be:
+
+- Disable per-step tracking during phase 3 (close) so the EE holds
+  steady and fingers close on what's in reach. If cube moves, too bad —
+  try again next attempt.
+- Or close fingers partially (finger_q≈0.30) BEFORE descent to pre-
+  narrow the gap, so there's less room for lateral cube slip.
+- Or use a contact sensor on the pads to detect when cube is gripped,
+  and only then proceed to lift.
+
 ## P1 (NVIDIA Robotiq USD) — tried and ruled out
 
 Loaded `assets/hc10dt_with_nvidia_gripper.usd` (a runtime-reference

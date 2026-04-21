@@ -149,8 +149,10 @@ def script_trajectory_waypoints(cube_pos_w: "torch.Tensor") -> list[dict]:
         {"ee_pos": torch.tensor([cx, cy, grasp_h]),    "gripper": -1.0, "steps": 120},
         # E: lift with cube in hand.
         {"ee_pos": torch.tensor([cx, cy, lift_h]),     "gripper": -1.0, "steps": 80},
-        # F: transport to the place target (stay closed).
-        {"ee_pos": torch.tensor([tx, ty, lift_h]),     "gripper": -1.0, "steps": 120},
+        # F: transport to the place target (stay closed). Extended to 300
+        #    steps (5 s at 60 Hz) so the EE moves gently — previous 120 steps
+        #    meant fast arm swings that jarred the cube out of the grip.
+        {"ee_pos": torch.tensor([tx, ty, lift_h]),     "gripper": -1.0, "steps": 300},
         # G: hold at target so the success detector can fire.
         {"ee_pos": torch.tensor([tx, ty, lift_h]),     "gripper": -1.0, "steps": 80},
     ]

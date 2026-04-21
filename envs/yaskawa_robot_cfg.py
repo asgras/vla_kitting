@@ -29,7 +29,12 @@ import pathlib
 
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg
-from isaaclab.sim import UsdFileCfg
+from isaaclab.sim import (
+    ArticulationRootPropertiesCfg,
+    CollisionPropertiesCfg,
+    RigidBodyPropertiesCfg,
+    UsdFileCfg,
+)
 
 _ASSETS = pathlib.Path(__file__).resolve().parents[1] / "assets"
 HC10DT_ROBOTIQ_USD = str(_ASSETS / "hc10dt_with_ria_gripper.usd")
@@ -40,6 +45,33 @@ HC10DT_ROBOTIQ_CFG = ArticulationCfg(
     spawn=UsdFileCfg(
         usd_path=HC10DT_ROBOTIQ_USD,
         activate_contact_sensors=True,
+        # Mirrors the working UR10e2F85GearAssemblyEnvCfg at
+        # isaaclab_tasks/manager_based/manipulation/deploy/gear_assembly/
+        # config/ur_10e/joint_pos_env_cfg.py (a known-working Robotiq 2F-85
+        # pick task). disable_gravity=True is the key reference-proven
+        # setting that keeps the fingers from sagging closed under their
+        # own weight during arm motion. contact_offset 0.005 + rest_offset
+        # 0 tightens contact detection for the pad-cube grasp.
+        rigid_props=RigidBodyPropertiesCfg(
+            disable_gravity=True,
+            max_depenetration_velocity=5.0,
+            linear_damping=0.0,
+            angular_damping=0.0,
+            max_linear_velocity=1000.0,
+            max_angular_velocity=3666.0,
+            enable_gyroscopic_forces=True,
+            solver_position_iteration_count=4,
+            solver_velocity_iteration_count=1,
+            max_contact_impulse=1e32,
+        ),
+        articulation_props=ArticulationRootPropertiesCfg(
+            enabled_self_collisions=False,
+            solver_position_iteration_count=4,
+            solver_velocity_iteration_count=1,
+        ),
+        collision_props=CollisionPropertiesCfg(
+            contact_offset=0.005, rest_offset=0.0,
+        ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
         pos=(0.0, 0.0, 0.0),
@@ -67,32 +99,31 @@ HC10DT_ROBOTIQ_CFG = ArticulationCfg(
             effort_limit_sim=1000.0,
             velocity_limit_sim=2.0,
         ),
-        # Gain-tuning attempts on this URDF-derived Robotiq:
-        #   11.25/0.1/10  — canonical Isaac Lab UR10e_ROBOTIQ_2F_85_CFG;
-        #                   too soft for our setup, fingers drifted to q=0.78
-        #                   during arm swing despite OPEN command
-        #   400/8/20      — intermediate; still finger_q=0.53 under swing
-        #   5000/100/50   — holds OPEN cleanly but cube still didn't lift
-        #                   (contact physics, not drive gains, is limiting)
-        # Keeping the 5000/100/50 combo here because it at least gets the
-        # cube correctly aligned between the pads; the lift failure is
-        # believed to be in pad collision geometry or Robotiq mimic-chain
-        # physics, which would need asset-level work to fix.
+        # Values verbatim from the working UR10e2F85GearAssemblyEnvCfg at
+        # isaaclab_tasks/manager_based/manipulation/deploy/gear_assembly/
+        # config/ur_10e/joint_pos_env_cfg.py. That task is Isaac Lab's
+        # reference-proven Robotiq 2F-85 manipulation config.
+        #
+        # Critical difference from canonical UR10e_ROBOTIQ_2F_85_CFG:
+        # gripper_finger stiffness jumps 0.2 → 10.0 (50×) with matching
+        # damping. This is what keeps the pads parallel during close
+        # under contact load — without it our pads were independent enough
+        # that the cube popped out laterally.
         "gripper_drive": ImplicitActuatorCfg(
             joint_names_expr=["finger_joint"],
-            effort_limit_sim=50.0,
-            velocity_limit_sim=2.0,
-            stiffness=5000.0,
-            damping=100.0,
+            effort_limit_sim=10.0,
+            velocity_limit_sim=1.0,
+            stiffness=40.0,
+            damping=1.0,
             friction=0.0,
             armature=0.0,
         ),
         "gripper_finger": ImplicitActuatorCfg(
             joint_names_expr=[".*_inner_finger_joint"],
-            effort_limit_sim=1.0,
-            velocity_limit_sim=1.0,
-            stiffness=0.2,
-            damping=0.001,
+            effort_limit_sim=10.0,
+            velocity_limit_sim=10.0,
+            stiffness=10.0,
+            damping=0.05,
             friction=0.0,
             armature=0.0,
         ),

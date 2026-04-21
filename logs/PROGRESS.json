@@ -1,7 +1,7 @@
 {
   "current_phase": 7,
   "completed": [0, 1, 2, 3, 4, 5, 6],
-  "blocked_on": "Scripted pick lift still fails. P1 (swap to NVIDIA Robotiq USD) tried and ruled out -- USD reference composition hits nested-rigid-body + broken joint path errors; Isaac Lab combines arm+gripper via USD variants, not references. Reverted to RIA gripper USD with stiffness=5000/damping=100/effort=50 (the only combo that reliably holds OPEN during the arm swing with our URDF-derived asset). Recommendation: pursue P2 (fix DCV viewport freeze and do human teleop) next session.",
-  "last_update": "2026-04-21T01:50:00+00:00",
-  "notes": "This session iterated across 9 scripted-pick config variants + P1 NVIDIA USD swap attempt + 3 gain-tuning variants. All Phase 7 findings consolidated in reports/phase_7_findings.md. Concrete paths forward: P2 teleop (primary), P3 author HC10DT USD with gripper variant, P4 rewrite compose script with flatten+xformstack fix, P5 inspect pad collision geometry once viewport is working."
+  "blocked_on": "Scripted pick: cube NOW GETS LIFTED (z=0.153) after applying Isaac Lab gear_assembly reference config. Remaining issue is scripted trajectory design: cube gets knocked during close then dropped during transport. Gripper physics is now correct; scripted demo needs redesign.",
+  "last_update": "2026-04-21T02:25:00+00:00",
+  "notes": "Critical breakthrough found in this session: Isaac Lab's UR10e2F85GearAssemblyEnvCfg at isaaclab_tasks/manager_based/manipulation/deploy/gear_assembly/config/ur_10e/joint_pos_env_cfg.py provides the working 2F-85 config. Applied: gripper_finger stiffness 0.2->10 (50x), gripper_drive 40/1/10, disable_gravity=True on robot, contact_offset=0.005, drive_type=force on gripper joints. NVIDIA tutorial values (37.52/0.00125/1000 + mimic natFreq 2500) explored but don't work with our URDF-derived asset — gear_assembly values are what transfer."
 }

@@ -1,0 +1,601 @@
+{
+  "file": "/home/ubuntu/vla_kitting/assets/hc10dt_with_ria_gripper.usd",
+  "default_prim": "/hc10dt_with_ria_gripper",
+  "prims": [
+    {
+      "path": "/hc10dt_with_ria_gripper",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/base_link",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/base_link/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/base_link/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/base",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/base/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/base/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints",
+      "type": "Scope"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/base_link_base",
+      "type": "PhysicsFixedJoint"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/joint_1_s",
+      "type": "PhysicsRevoluteJoint"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/joint_2_l",
+      "type": "PhysicsRevoluteJoint"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/joint_3_u",
+      "type": "PhysicsRevoluteJoint"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/joint_4_r",
+      "type": "PhysicsRevoluteJoint"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/joint_5_b",
+      "type": "PhysicsRevoluteJoint"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/joint_6_t",
+      "type": "PhysicsRevoluteJoint"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/joint_6_t_tool0",
+      "type": "PhysicsFixedJoint"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/gripper_mount",
+      "type": "PhysicsFixedJoint"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/finger_joint",
+      "type": "PhysicsRevoluteJoint"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/left_outer_finger_joint",
+      "type": "PhysicsFixedJoint"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/left_inner_finger_joint",
+      "type": "PhysicsRevoluteJoint"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/left_inner_finger_pad_joint",
+      "type": "PhysicsFixedJoint"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/left_inner_knuckle_joint",
+      "type": "PhysicsRevoluteJoint"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/right_inner_knuckle_joint",
+      "type": "PhysicsRevoluteJoint"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/right_outer_knuckle_joint",
+      "type": "PhysicsRevoluteJoint"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/right_outer_finger_joint",
+      "type": "PhysicsFixedJoint"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/right_inner_finger_joint",
+      "type": "PhysicsRevoluteJoint"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/right_inner_finger_pad_joint",
+      "type": "PhysicsFixedJoint"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/link_1_s",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/link_1_s/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/link_1_s/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/link_2_l",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/link_2_l/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/link_2_l/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/link_3_u",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/link_3_u/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/link_3_u/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/link_4_r",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/link_4_r/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/link_4_r/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/link_5_b",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/link_5_b/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/link_5_b/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/link_6_t",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/link_6_t/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/link_6_t/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/tool0",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/tool0/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/tool0/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/robotiq_arg2f_base_link",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/robotiq_arg2f_base_link/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/robotiq_arg2f_base_link/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/left_outer_knuckle",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/left_outer_knuckle/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/left_outer_knuckle/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/left_outer_finger",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/left_outer_finger/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/left_outer_finger/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/left_inner_finger",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/left_inner_finger/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/left_inner_finger/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/left_inner_finger_pad",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/left_inner_finger_pad/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/left_inner_finger_pad/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/left_inner_knuckle",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/left_inner_knuckle/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/left_inner_knuckle/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/right_inner_knuckle",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/right_inner_knuckle/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/right_inner_knuckle/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/right_outer_knuckle",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/right_outer_knuckle/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/right_outer_knuckle/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/right_outer_finger",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/right_outer_finger/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/right_outer_finger/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/right_inner_finger",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/right_inner_finger/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/right_inner_finger/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/right_inner_finger_pad",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/right_inner_finger_pad/visuals",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/right_inner_finger_pad/collisions",
+      "type": "Xform"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks",
+      "type": "Scope"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/Yaskawa_white",
+      "type": "Material"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/Yaskawa_white/Yaskawa_white",
+      "type": "Shader"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/metallic",
+      "type": "Material"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/metallic/metallic",
+      "type": "Shader"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/material_2126BF",
+      "type": "Material"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/material_2126BF/Shader",
+      "type": "Shader"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/DefaultMaterial",
+      "type": "Material"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/DefaultMaterial/DefaultMaterial",
+      "type": "Shader"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/Yaskawa_blue",
+      "type": "Material"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/Yaskawa_blue/Yaskawa_blue",
+      "type": "Shader"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/Yaskawa_blue_0",
+      "type": "Material"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/Yaskawa_blue_0/Yaskawa_blue",
+      "type": "Shader"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/DefaultMaterial_0",
+      "type": "Material"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/DefaultMaterial_0/DefaultMaterial",
+      "type": "Shader"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/mymaterial",
+      "type": "Material"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/mymaterial/mymaterial",
+      "type": "Shader"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/mymaterial_1",
+      "type": "Material"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/mymaterial_1/mymaterial_1",
+      "type": "Shader"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/material_191919",
+      "type": "Material"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/material_191919/Shader",
+      "type": "Shader"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/DefaultMaterial_1",
+      "type": "Material"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/DefaultMaterial_1/DefaultMaterial",
+      "type": "Shader"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/material_CAD1EE",
+      "type": "Material"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/material_CAD1EE/Shader",
+      "type": "Shader"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/material_E6E6E6",
+      "type": "Material"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/Looks/material_E6E6E6/Shader",
+      "type": "Shader"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/root_joint",
+      "type": "PhysicsFixedJoint"
+    }
+  ],
+  "articulations": [
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/root_joint",
+      "type": "PhysicsFixedJoint"
+    }
+  ],
+  "joints": [
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/joint_1_s",
+      "type": "PhysicsRevoluteJoint",
+      "name": "joint_1_s",
+      "lower": -180.0,
+      "upper": 180.0
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/joint_2_l",
+      "type": "PhysicsRevoluteJoint",
+      "name": "joint_2_l",
+      "lower": -180.0,
+      "upper": 180.0
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/joint_3_u",
+      "type": "PhysicsRevoluteJoint",
+      "name": "joint_3_u",
+      "lower": -4.999999523162842,
+      "upper": 355.0
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/joint_4_r",
+      "type": "PhysicsRevoluteJoint",
+      "name": "joint_4_r",
+      "lower": -180.0,
+      "upper": 180.0
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/joint_5_b",
+      "type": "PhysicsRevoluteJoint",
+      "name": "joint_5_b",
+      "lower": -180.0,
+      "upper": 180.0
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/joint_6_t",
+      "type": "PhysicsRevoluteJoint",
+      "name": "joint_6_t",
+      "lower": -180.0,
+      "upper": 180.0
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/finger_joint",
+      "type": "PhysicsRevoluteJoint",
+      "name": "finger_joint",
+      "lower": 0.0,
+      "upper": 45.83662033081055
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/left_inner_finger_joint",
+      "type": "PhysicsRevoluteJoint",
+      "name": "left_inner_finger_joint",
+      "lower": -50.20000076293945,
+      "upper": 0.0
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/left_inner_knuckle_joint",
+      "type": "PhysicsRevoluteJoint",
+      "name": "left_inner_knuckle_joint",
+      "lower": 0.0,
+      "upper": 50.20000076293945
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/right_inner_knuckle_joint",
+      "type": "PhysicsRevoluteJoint",
+      "name": "right_inner_knuckle_joint",
+      "lower": 0.0,
+      "upper": 50.20000076293945
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/right_outer_knuckle_joint",
+      "type": "PhysicsRevoluteJoint",
+      "name": "right_outer_knuckle_joint",
+      "lower": 0.0,
+      "upper": 46.400001525878906
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/joints/right_inner_finger_joint",
+      "type": "PhysicsRevoluteJoint",
+      "name": "right_inner_finger_joint",
+      "lower": -50.20000076293945,
+      "upper": 0.0
+    }
+  ],
+  "rigid_bodies": [
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/base_link"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/base"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/link_1_s"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/link_2_l"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/link_3_u"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/link_4_r"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/link_5_b"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/link_6_t"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/tool0"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/robotiq_arg2f_base_link"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/left_outer_knuckle"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/left_outer_finger"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/left_inner_finger"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/left_inner_finger_pad"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/left_inner_knuckle"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/right_inner_knuckle"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/right_outer_knuckle"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/right_outer_finger"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/right_inner_finger"
+    },
+    {
+      "path": "/hc10dt_with_ria_gripper/root_joint/right_inner_finger_pad"
+    }
+  ],
+  "revolute_count": 12
+}

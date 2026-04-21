@@ -148,7 +148,11 @@ class ActionsCfg:
         asset_name="robot",
         joint_names=["finger_joint"],
         open_command_expr={"finger_joint": 0.0},
-        close_command_expr={"finger_joint": 0.65},
+        # 0.5 rad is just past the 50 mm-cube contact angle (~0.43 rad
+        # with full 85 mm open span). Lower than prior 0.65 to reduce
+        # post-contact squeeze force that was launching the cube during
+        # close. Matches the reference gear_large=0.45 pattern.
+        close_command_expr={"finger_joint": 0.5},
     )
 
 
