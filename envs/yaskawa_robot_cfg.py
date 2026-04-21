@@ -59,10 +59,19 @@ HC10DT_ROBOTIQ_CFG = ArticulationCfg(
         #                    constraint preserved in the USD.
         "gripper_drive": ImplicitActuatorCfg(
             joint_names_expr=["finger_joint"],
-            effort_limit_sim=200.0,
+            # effort_limit_sim: 200 → 50 N·m. 200 N·m (uncapped) kicks the 50g
+            # cube sideways before contact friction stabilizes; 15 N·m closes
+            # too slowly to catch the cube by end of phase 3 (finger_q only
+            # reaches ~0.19 rad in 120 steps). 50 N·m closes in ~60 steps
+            # and applies realistic grasp force (~0.8 × real Robotiq's 60 N
+            # pad force at the ~6 cm lever, i.e. well within physical realism).
+            effort_limit_sim=50.0,
             velocity_limit_sim=2.0,
-            stiffness=500.0,
-            damping=10.0,
+            # stiffness/damping (5000, 100): still holds the OPEN target
+            # against arm inertia during approach/reorient (fixed the prior
+            # pre-close failure mode).
+            stiffness=5000.0,
+            damping=100.0,
             friction=0.0,
             armature=0.0,
         ),

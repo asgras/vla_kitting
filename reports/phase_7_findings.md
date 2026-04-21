@@ -1,67 +1,107 @@
 # Phase 7 scripted pick demo — findings and open issues
 
-Status: **partial success** — the scripted demo runs end-to-end (env stepping,
-recorder manager, HDF5 output, IK control, cube randomization), but the scripted
-pick-and-place physics doesn't yet produce a success. The script exposed several
-real bugs that would have broken human teleop too — fixing these before teleop
-was the explicit purpose of Phase 7.
+Status: **still partial**. Many iteration rounds have eliminated the earlier
+failure modes — the cube now stays perfectly aligned between the fingers
+through approach, descent, and close — but the gripper never holds the cube
+firmly enough to LIFT it off the table. The close command reaches contact
+angle and the fingers stall there, yet when the arm rises the cube remains
+at z = 0.025 (on the table). Believed to be a Robotiq-pad contact-geometry
+or mimic-chain-coupling issue in the PhysX simulation.
 
-## Bugs found and fixed
+## Bugs found and fixed across all iterations
 
-1. **Cube randomization was out of workspace.** The `reset_root_state_uniform`
-   event adds the range to the default pose. My original range `x: (0.45, 0.65)`
-   on a default of 0.55 put the cube at x = 1.0-1.2 m — outside the HC10DT's
-   practical reach envelope.
-   - Fixed to delta-style range: `x: (-0.08, 0.08)`, cube stays around (0.55, 0).
+(Listed in order they were identified; all are in the committed code.)
 
-2. **IK action scale was too small for practical motion.** With `scale=0.05`
-   and my controller's 0.03 action clamp, effective EE motion was 0.0015 m per
-   control step — too slow for the 30cm transport in the allotted step budget.
-   - Fixed to `scale=0.1` + controller feeds raw `pos_err * 10` (clamped to ±1),
-     giving ~1 cm per step effective motion.
+1. **Cube randomization range was delta-style, not absolute**, so `x: (0.45, 0.65)`
+   on a default 0.55 landed the cube at x ≈ 1.0 — outside the arm envelope.
+   Fixed to deltas: `x: (-0.08, 0.08)` etc.
+2. **IK action scale too small** — `scale=0.05` × controller 0.03 clamp gave
+   ~1.5 mm per step. Raised to `scale=0.1` + raw controller clamp ±1.
+3. **Gripper action semantics inverted.** Isaac Lab's `BinaryJointPositionAction`
+   treats `actions < 0` as CLOSE. The scripted demo had them reversed.
+4. **Cube yaw randomization ±0.5 rad (±28°) rotated the cube corners outside
+   the gripper's straight-face expectation**, causing finger knuckles to
+   clip the cube during descent and bump it 5–20 mm sideways. Yaw range
+   pinned to 0 for Phase 7 scripted pick. (Re-enable once the scripted
+   controller reads `cube_rot` and aligns gripper yaw.)
+5. **Gripper drive stiffness 500 / damping 10 was too weak to hold the
+   commanded OPEN target during rapid arm motion.** Finger_joint drifted
+   to ~0.48 rad under inertial loading even with gripper commanded OPEN,
+   which pre-closed the pads and scooped the cube during descent. Raised
+   to stiffness 5000 / damping 100 — now finger_q stays at ~0.07 rad when
+   commanded open. Cube completely undisturbed through approach + descent.
+6. **Gripper drive effort cap 200 N·m was too aggressive on close** — the
+   huge impulsive closing torque kicked the 50 g cube out of the pads
+   before contact friction could stabilize. Dropped to 50 N·m (realistic
+   continuous 2F-85 grasp force at the knuckle: ~14 N·m).
+7. **Close command target 0.79 rad was too far past contact.** For a 50 mm
+   cube, contact occurs near finger_q ≈ 0.50 rad. A target of 0.79 means
+   that even after the pads contact the cube, the PD drive applies max
+   effort trying to close further — continuously pushing the cube out of
+   one pad due to the mimic-chain asymmetry. Dropped to 0.65 (a touch past
+   contact, so grip is firm but not overshooting aggressively).
+8. **Scripted demo used only the initial cube pose.** Tiny nudges during
+   descent moved the cube out of the EE's target, so close happened at a
+   stale cube XY. Added per-step cube-XY tracking for phases 0–4
+   (approach, hover, descent, close, lift). With tracking active, the
+   cube stays within ~2 mm of EE XY through the entire pick.
 
-3. **Gripper action semantics were inverted.** Isaac Lab's
-   `BinaryJointPositionAction.process_actions` treats `actions < 0` as CLOSE
-   and `actions >= 0` as OPEN. I had written the scripted demo assuming the
-   opposite, so the gripper was opening during the grasp phase and closing
-   during approach.
-   - Fixed in `scripts/validate/scripted_pick_demo.py`.
+## Remaining open issue
 
-4. **Grasp height needs tuning.** The tool0 frame (wrist) is ~11-14cm above
-   the Robotiq fingertips in our URDF, but the exact offset depends on finger
-   pose. With `grasp_h=0.20` (tool0 at z=0.20), fingertips are roughly at
-   z=0.06, above the cube top (z=0.05) — closing around air.
-   - Current best estimate: `grasp_h ~ 0.14` (fingertips near cube center 0.025).
+**The cube will not lift, even when it is visibly centered between closed
+pads at the end of phase 3.** Across every configuration tried:
 
-## Open issue blocking scripted success
+- Phase 3 midway: cube at its init position ±1–2 mm, EE centered on it,
+  `grip_closed=1.0` (finger_q > 0.4 threshold).
+- Phase 4 lift: EE rises to z = 0.318 but cube stays at z = 0.025 (on
+  table). finger_q continues closing from ~0.47 → ~0.67 rad (i.e. fingers
+  close past the cube instead of grabbing it).
 
-Even with the gripper semantics fixed, the cube is not being picked up reliably:
-tested `grasp_h = 0.12`, `0.14`, `0.16`, `0.20`. At z=0.12 the gripper doesn't
-seem to close (knuckle stays open) — likely the fingers are jamming against the
-table surface at that height. At higher grasp_h, the fingers close but around air.
+What this tells us: by phase 4 start, the fingers HAVE reached contact
+angle (finger_q=0.47 is just past the 0.50 rad contact point for a 50 mm
+cube), but the contact is evidently not solid enough to lift the cube.
+Then during lift the fingers continue closing (finger_q→0.67), which is
+physically impossible with a 50 mm cube between them — so the cube must
+have escaped the pads before the actual lift motion begins.
 
-Hypotheses to investigate:
-- **Finger-table collision interference.** Fingertip position when gripper is
-  open is likely below z=0.05 — fingers hit the table before reaching the cube.
-  Try lifting the table slightly or building the table with a proper collision
-  mesh.
-- **Robotiq drive gains too weak to overcome contact.** Gripper stiffness=500
-  may not be enough to close around a 0.9-friction cube against the table.
-  Could be increased to 2000+.
-- **Mimic joint limits are infinite.** Phase 4's smoke test warns
-  `robotiq_85_left_inner_knuckle_joint needs a finite limit set to be used by
-  the mimic joint feature`. PhysX may not apply mimic constraints reliably.
-  Patch URDF to give the continuous joints finite limits.
+## Hypotheses still untried
+
+1. **Pad collision geometry may differ from pad visual geometry.** The
+   `left_inner_finger_pad` body shows body_pos_w at a specific location,
+   but the actual collision box PhysX uses could be smaller / offset. The
+   USD would need inspection with a stage viewer.
+2. **Switch to the NVIDIA Robotiq 2F-85 USD** (`assets/hc10dt_with_nvidia_gripper.usd`,
+   2.3 KB shell; the payloads are in `assets/nvidia_robotiq_2f85/`). This
+   is the canonical NVIDIA-packaged Robotiq with tuned contact materials.
+   The current setup uses a custom ros-industrial-attic URDF converted
+   via our own `urdf_to_usd.py`.
+3. **Increase PhysX articulation solver iterations** — current uses Isaac
+   Lab defaults. The Robotiq mimic chain has 5 dependent joints that all
+   need to converge per step, plus pad-cube contact constraints. Try
+   bumping `solver_position_iteration_count=32` and `velocity=4` on the
+   articulation cfg (currently only set on the cube).
+4. **Contact-offset / rest-offset on the cube collision.** Current cfg
+   uses defaults; experiments with small offsets sometimes fix
+   "grip slides off" issues.
+5. **`enable_external_forces_every_iteration=True` on PhysxCfg** — sim
+   logged a warning about this being off.
 
 ## Recommendation
 
-Before the teleop human gate, the user should either:
-- **(a) Manually teleop once in DCV** (`just teleop display=1 num=1`) and visually
-  diagnose the gripper/grasp geometry, then adjust as needed. Human vision makes
-  this much faster than scripted debugging.
-- **(b) Invest 1-2 hours tuning the scripted demo** by trying the hypotheses
-  above one by one.
+Given the pipeline-validation purpose of V1, three paths forward:
 
-Given the purpose of V1 is to validate the pipeline (teleop → Mimic → train),
-and human teleop is already part of that pipeline, (a) is probably the right
-call. If teleop produces successful demos, Mimic then amplifies those.
+- **(P1) Switch to the NVIDIA Robotiq USD** (hypothesis 2 above). Asset
+  swap; fastest experiment. If it works, immediately unblocks the rest
+  of the pipeline.
+- **(P2) Human teleop (original Phase 6 path).** V1's goal was always
+  validation via teleop→Mimic→train. Teleop bypasses the scripted
+  alignment problem entirely because a human can nudge the cube into
+  the grip via small corrections. We still need to unblock the viewport
+  freeze noted in `reports/phase_6_viewport_handoff.md` first, but that's
+  a known research problem with several concrete candidates.
+- **(P3) Increase PhysX solver fidelity + try contact offsets**
+  (hypotheses 3, 4, 5 above). Most risky — no guarantee these are the
+  right knobs.
+
+My lean is (P1) then (P2). (P3) is worth trying only after (P1) is ruled
+out, because it's speculative tuning without a clear physical hypothesis.

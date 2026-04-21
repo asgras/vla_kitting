@@ -201,11 +201,18 @@ def main() -> int:
         _log(f"attempt {attempted}: successes so far {successful}/{demo_target}")
         obs, _ = env.reset()
 
-        # Read privileged cube pose
+        # Read privileged cube pose (initial position, used for transport target).
         cube_pos = obs["policy"]["cube_pos"][0].clone()  # (3,)
         _log(f"  cube at ({cube_pos[0]:.3f}, {cube_pos[1]:.3f}, {cube_pos[2]:.3f})")
 
         waypoints = script_trajectory_waypoints(cube_pos)
+        # The first 5 waypoints (A-E: approach / hover / descent / close /
+        # lift) must track the cube's *current* XY before committing, because
+        # the descending gripper occasionally nudges the cube 5-10 mm before
+        # close. Without re-targeting, fingers close on the old XY and the
+        # cube slips past the pads. Phase indices F, G (transport + hold) use
+        # the fixed place target and should NOT follow the cube.
+        _TRACK_PHASES = {0, 1, 2, 3, 4}
 
         # Target orientation: tool0 +Z pointing in world -Z (gripper fingers down).
         # Built as the Hamilton product qz(yaw=0) * qx(π) → (0, 1, 0, 0) in (w,x,y,z).
@@ -226,7 +233,15 @@ def main() -> int:
         success_reached = False
 
         for phase_idx, wp in enumerate(waypoints):
-            target_pos = wp["ee_pos"].to("cuda:0")
+            base_target_pos = wp["ee_pos"].to("cuda:0")
+            target_pos = base_target_pos.clone()
+            # Re-read cube XY right before each pick phase so a descent-time
+            # nudge doesn't leave the EE targeting the initial cube pose.
+            # (Per-step tracking below handles slides during close too.)
+            if phase_idx in _TRACK_PHASES:
+                live_cube = obs["policy"]["cube_pos"][0]
+                target_pos[0] = live_cube[0]
+                target_pos[1] = live_cube[1]
             gripper_cmd = wp["gripper"]
             phase_steps = wp["steps"]
 
@@ -255,6 +270,15 @@ def main() -> int:
                 current_ee = obs["policy"]["ee_pose"][0]  # (7,)
                 cur_pos = current_ee[:3]
                 cur_quat = current_ee[3:7]
+
+                # Per-step cube tracking: in pick phases, the asymmetric
+                # Robotiq close can push the cube several mm during the close
+                # itself. Without per-step re-centering, EE targets a stale
+                # cube XY and fingers close around empty space on one side.
+                if phase_idx in _TRACK_PHASES:
+                    live_cube = obs["policy"]["cube_pos"][0]
+                    target_pos[0] = live_cube[0]
+                    target_pos[1] = live_cube[1]
 
                 # Position: P-controller, saturates at 10 cm position error.
                 pos_err = target_pos - cur_pos

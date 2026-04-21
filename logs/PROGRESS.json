@@ -1,7 +1,7 @@
 {
   "current_phase": 7,
-  "completed": [0, 1, 2, 3, 4, 5, 6, 7],
-  "blocked_on": "Phase 7 partial: scripted pick runs but doesn't produce a successful lift. 4 real bugs fixed. See reports/phase_7_findings.md.",
-  "last_update": "2026-04-19T04:10:00+00:00",
-  "notes": "Phase 7 iteration surfaced: (1) cube randomization out of workspace - fixed, (2) IK action scale too small - fixed, (3) gripper action semantics inverted - fixed, (4) grasp_h needs tuning. Remaining issue: finger-table collision or mimic joint physics. User should manually teleop once to visually tune before bulk demos. Two commits on vla-pipeline-v1 branch."
+  "completed": [0, 1, 2, 3, 4, 5, 6],
+  "blocked_on": "Phase 7 scripted pick still fails to LIFT the cube. Cube alignment problem fully fixed (yaw=0, gripper stiffness/effort, close target 0.65, per-step cube tracking) - cube stays perfectly centered between closed pads - but grip doesn't hold during lift. Fingers close past cube (finger_q reaches 0.67) meaning cube escapes before lift-off. Suspect Robotiq pad collision geometry or mimic-chain physics. See reports/phase_7_findings.md.",
+  "last_update": "2026-04-21T01:25:00+00:00",
+  "notes": "This session's iterations across 9 config variants (see logs/phase_7_rerun{1..9}*.log) resolved the cube-slides-during-close failure but surfaced a deeper grip-doesn't-hold-during-lift failure. Three paths forward documented: (P1) swap to NVIDIA Robotiq USD, (P2) fall back to human teleop (original Phase 6 plan) after fixing viewport freeze, (P3) tune PhysX solver iterations + contact offsets."
 }

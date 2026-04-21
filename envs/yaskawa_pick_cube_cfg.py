@@ -133,13 +133,22 @@ class ActionsCfg:
         scale=0.1,
     )
     # Only finger_joint is driven; the 5 mimic joints follow via the USD's
-    # PhysxMimicJointAPI. Close target ≈ 0.79 rad (the 2F-85's "closed"
-    # position per its URDF limit of 0.8 rad).
+    # PhysxMimicJointAPI.
+    #
+    # close target 0.79 (full close) tried first — too aggressive, the large
+    # residual position error (~0.45 rad) after cube contact combined with
+    # the mimic-chain asymmetry pushed the cube out of the passive-side pad.
+    # Dropped to 0.45 — too low: cube holds fingers open at q≈0.50, so
+    # position error goes NEGATIVE and the PD drive pushes fingers back open
+    # at the -50 N·m effort cap, releasing the cube. Need target > q@contact.
+    # Current 0.65 — cube holds fingers at q≈0.50 (contact), positive error
+    # 0.15 rad * 5000 = 750 N·m saturates at +50 N·m gripping force, which
+    # is the realistic continuous grasp force for a 2F-85 at pad contact.
     gripper_action = BinaryJointPositionActionCfg(
         asset_name="robot",
         joint_names=["finger_joint"],
         open_command_expr={"finger_joint": 0.0},
-        close_command_expr={"finger_joint": 0.79},
+        close_command_expr={"finger_joint": 0.65},
     )
 
 
@@ -188,7 +197,16 @@ class EventCfg:
                 "x": (-0.08, 0.08),
                 "y": (-0.10, 0.10),
                 "z": (0.0, 0.0),
-                "yaw": (-0.5, 0.5),
+                # Yaw randomization disabled for Phase 7 scripted pick. With
+                # ±0.5 rad yaw (±28°), the 50 mm cube corners (diag 70.7 mm)
+                # stuck out past the 2F-85 finger knuckles' X extent (~35 mm
+                # from tool0), so during the top-down descent the open pads
+                # clipped the rotated cube and bumped it 5-20 mm sideways
+                # before the close command. The scripted controller reads
+                # cube_pos but not cube_rot; re-enable yaw randomization only
+                # once the scripted controller aligns gripper yaw to cube yaw
+                # (or the teleop operator does so manually).
+                "yaw": (0.0, 0.0),
             },
             "velocity_range": {},
             "asset_cfg": SceneEntityCfg("cube"),
