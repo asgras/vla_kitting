@@ -36,10 +36,10 @@ def ee_pose_world(
 def gripper_is_closed(
     env: "ManagerBasedRLEnv",
     robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    knuckle_joint: str = "robotiq_85_left_knuckle_joint",
+    knuckle_joint: str = "finger_joint",
     threshold: float = 0.4,
 ) -> torch.Tensor:
-    """Binary indicator: 1 if gripper knuckle position is past threshold (closing)."""
+    """Binary indicator: 1 if the gripper's drive joint is past `threshold`."""
     robot: Articulation = env.scene[robot_cfg.name]
     idx = robot.joint_names.index(knuckle_joint)
     pos = robot.data.joint_pos[:, idx]

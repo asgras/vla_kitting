@@ -132,29 +132,14 @@ class ActionsCfg:
         # then effectively caps step size to 1-2 cm for stability.
         scale=0.1,
     )
-    # Drive all 6 Robotiq revolute joints explicitly. The USD <mimic> tags are
-    # recorded but not enforced kinematically, so we emulate the mimic ties in
-    # the action: multipliers match the URDF (right/inner_right/left_finger_tip
-    # = -1 × left_knuckle; the others = +1 × left_knuckle).
+    # Only finger_joint is driven; the 5 mimic joints follow via the USD's
+    # PhysxMimicJointAPI. Close target ≈ 0.79 rad (the 2F-85's "closed"
+    # position per its URDF limit of 0.8 rad).
     gripper_action = BinaryJointPositionActionCfg(
         asset_name="robot",
-        joint_names=["robotiq_85_.*_joint"],
-        open_command_expr={
-            "robotiq_85_left_knuckle_joint": 0.0,
-            "robotiq_85_right_knuckle_joint": 0.0,
-            "robotiq_85_left_inner_knuckle_joint": 0.0,
-            "robotiq_85_right_inner_knuckle_joint": 0.0,
-            "robotiq_85_left_finger_tip_joint": 0.0,
-            "robotiq_85_right_finger_tip_joint": 0.0,
-        },
-        close_command_expr={
-            "robotiq_85_left_knuckle_joint": 0.78,
-            "robotiq_85_right_knuckle_joint": -0.78,
-            "robotiq_85_left_inner_knuckle_joint": 0.78,
-            "robotiq_85_right_inner_knuckle_joint": -0.78,
-            "robotiq_85_left_finger_tip_joint": -0.78,
-            "robotiq_85_right_finger_tip_joint": 0.78,
-        },
+        joint_names=["finger_joint"],
+        open_command_expr={"finger_joint": 0.0},
+        close_command_expr={"finger_joint": 0.79},
     )
 
 

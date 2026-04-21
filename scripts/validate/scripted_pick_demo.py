@@ -119,27 +119,20 @@ def script_trajectory_waypoints(cube_pos_w: "torch.Tensor") -> list[dict]:
     # unambiguous.
     tx, ty = 0.65, 0.20
 
-    # The inner-knuckle collision mesh (STL bbox 5cm long in local +x and +z)
-    # is what actually grips the cube — the outer finger_tip_link converges to
-    # x≈±0.027 at full close which is just outside the cube's ±0.025 half-
-    # width. At full close (θ=0.8) the mesh spans base-frame z=[0.053, 0.126],
-    # so when tool0 is top-down the mesh spans world z = [tool0_z - 0.126,
-    # tool0_z - 0.053]. For the mesh to wrap cube sides (z=[0, 0.05]) we want
-    # tool0_z ≈ 0.13. But if we try to close the gripper while tool0 sits at
-    # 0.13, the rotating mesh drops below z=0 and the table blocks rotation —
-    # knuckle stalls at ≈0 rad (observed empirically).
+    # Heights for the canonical (RIA) Robotiq 2F-85. The real grip surface is
+    # the inner_finger_pad (22×6.35×37.5 mm box, origin measured to sit
+    # ~0.14 m below tool0 when the arm is fully top-down). Cube spans
+    # z=[0, 0.05] (center 0.025). To pinch the cube centered on its midline
+    # we want pad_z ≈ 0.025 at the grasp pose, giving tool0_z ≈ 0.165.
+    # Approach is kept well above the cube to avoid dragging anything in.
     #
-    # Fix: descend to grasp_h with gripper open, then issue close and lift
-    # commands simultaneously. As tool0 rises, the mesh clears the table so
-    # rotation can progress, and the fingers catch the cube on the way up.
-    #
-    #   approach_h = 0.35  -> fingertip at z≈0.25 (clear of cube)
-    #   grasp_h    = 0.130 -> outer fingertip at z=0.032 (beside cube lower
-    #                          half), inner-knuckle origin at z=0.069
-    #   lift_h     = 0.30  -> fingertip at z=0.20 (15 cm above table)
+    #   approach_h = 0.35  -> pad at z≈0.21 (well above cube)
+    #   grasp_h    = 0.17  -> pad at z≈0.03 (center of cube), pad box
+    #                          extends z≈0.011-0.049, clear of table
+    #   lift_h     = 0.32  -> pad at z≈0.18 (17 cm above table)
     approach_h = 0.35
-    grasp_h = 0.130
-    lift_h = 0.30
+    grasp_h = 0.17
+    lift_h = 0.32
 
     # BinaryJointPositionAction: actions < 0 => CLOSE, >= 0 => OPEN. So
     # gripper = +1.0 is OPEN, -1.0 is CLOSE.
@@ -149,21 +142,16 @@ def script_trajectory_waypoints(cube_pos_w: "torch.Tensor") -> list[dict]:
         {"ee_pos": torch.tensor([cx, cy, approach_h]), "gripper": +1.0, "steps": 140},
         # B: settle at hover (kills residual XY drift before descent).
         {"ee_pos": torch.tensor([cx, cy, approach_h]), "gripper": +1.0, "steps": 30},
-        # C: pure-vertical descent with gripper open — fingertips come to rest
-        #    beside the cube's lower half.
-        {"ee_pos": torch.tensor([cx, cy, grasp_h]),    "gripper": +1.0, "steps": 80},
-        # D: slow rise to a "close height" where the inner-knuckle mesh is
-        #    just clear of the table (so close can rotate) but still in the
-        #    upper half of the cube (so the mesh actually pinches it). Start
-        #    commanding close here — the close will catch up as tool0 rises.
-        {"ee_pos": torch.tensor([cx, cy, 0.16]),       "gripper": -1.0, "steps": 120},
-        # E: hold at close height while the close command finalizes its grip.
-        {"ee_pos": torch.tensor([cx, cy, 0.16]),       "gripper": -1.0, "steps": 80},
-        # F: lift with cube in hand.
-        {"ee_pos": torch.tensor([cx, cy, lift_h]),     "gripper": -1.0, "steps": 70},
-        # G: transport to the place target (stay closed).
+        # C: pure-vertical descent to grasp height (pads straddle cube sides).
+        {"ee_pos": torch.tensor([cx, cy, grasp_h]),    "gripper": +1.0, "steps": 100},
+        # D: close gripper in place. With MimicJointAPI driving the chain,
+        #    finger_joint needs moderate time to converge under contact.
+        {"ee_pos": torch.tensor([cx, cy, grasp_h]),    "gripper": -1.0, "steps": 120},
+        # E: lift with cube in hand.
+        {"ee_pos": torch.tensor([cx, cy, lift_h]),     "gripper": -1.0, "steps": 80},
+        # F: transport to the place target (stay closed).
         {"ee_pos": torch.tensor([tx, ty, lift_h]),     "gripper": -1.0, "steps": 120},
-        # H: hold at target so the success detector can fire.
+        # G: hold at target so the success detector can fire.
         {"ee_pos": torch.tensor([tx, ty, lift_h]),     "gripper": -1.0, "steps": 80},
     ]
 
@@ -243,22 +231,22 @@ def main() -> int:
             phase_steps = wp["steps"]
 
             phase_start_ee = obs["policy"]["ee_pose"][0]
-            # Probe the actual left-knuckle joint angle AND the world-Z of the
-            # left inner-knuckle link (the body that carries the inner pad
-            # mesh in this URDF — the real gripping surface). If the inner
-            # pad drops near z=0 during close, the table blocks further
-            # closing.
+            # Diagnostics on the RIA 2F-85 — finger_joint angle, and world-Z
+            # of the left inner finger pad (the actual contact body).
             robot = env.unwrapped.scene["robot"]
-            knuckle_idx = robot.joint_names.index("robotiq_85_left_knuckle_joint")
-            knuckle_q = float(robot.data.joint_pos[0, knuckle_idx])
-            inner_idx = robot.body_names.index("robotiq_85_left_inner_knuckle_link")
-            inner_z = float(robot.data.body_pos_w[0, inner_idx, 2])
-            fingertip_idx = robot.body_names.index("robotiq_85_left_finger_tip_link")
-            fingertip_z = float(robot.data.body_pos_w[0, fingertip_idx, 2])
+            finger_idx = robot.joint_names.index("finger_joint")
+            finger_q = float(robot.data.joint_pos[0, finger_idx])
+            def _safe_z(name: str) -> float:
+                try:
+                    return float(robot.data.body_pos_w[0, robot.body_names.index(name), 2])
+                except ValueError:
+                    return float("nan")
+            pad_z = _safe_z("left_inner_finger_pad")
+            fingertip_z = _safe_z("left_inner_finger")
             _log(f"  phase {phase_idx}: EE ({phase_start_ee[0]:.2f},{phase_start_ee[1]:.2f},{phase_start_ee[2]:.2f}) -> "
                  f"target ({target_pos[0]:.2f},{target_pos[1]:.2f},{target_pos[2]:.2f}) "
-                 f"grip={gripper_cmd} knuckle={knuckle_q:.2f}rad "
-                 f"fingertip_z={fingertip_z:.3f} inner_z={inner_z:.3f}")
+                 f"grip={gripper_cmd} finger_q={finger_q:.2f}rad "
+                 f"fingertip_z={fingertip_z:.3f} pad_z={pad_z:.3f}")
 
             for step in range(phase_steps):
                 if total_steps >= args_cli.max_steps_per_demo:

@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<!--
+  HC10DT + canonical ros-industrial-attic Robotiq 2F-85 combined URDF.
+
+  Replaces our simplified 8-body Robotiq (robotiq_2f85_v1.urdf.xacro) with the
+  full 10-body topology used by Isaac Lab's UR10e_ROBOTIQ_2F_85_CFG: each side
+  has outer_knuckle / outer_finger / inner_knuckle / inner_finger /
+  inner_finger_pad, driven by the single revolute finger_joint. The right
+  side follows via the right_outer_knuckle_joint mimic; both inner chains
+  follow via their own mimics. scripts/assembly/urdf_to_usd.py will apply
+  PhysxMimicJointAPI to all mimic joints during USD import (with axis=rotX,
+  matching the URDF's axis="1 0 0").
+
+  Meshes come from ros-industrial-attic/robotiq (kinetic-devel) and are
+  staged at assets/robotiq_2f_85_ria/meshes/.
+-->
+<robot name="hc10dt_with_ria_gripper" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <!-- HC10DT arm -->
+  <xacro:include filename="/home/ubuntu/vla_kitting/assets/hc10dt_v1.urdf.xacro"/>
+
+  <!-- Canonical Robotiq 2F-85 macros (copied locally with rewritten mesh
+       paths so file:// URIs resolve without ROS package lookup). -->
+  <xacro:include filename="/home/ubuntu/vla_kitting/assets/robotiq_arg2f_85_macro.urdf.xacro"/>
+
+  <!-- Instantiate gripper under an empty prefix. -->
+  <xacro:robotiq_arg2f_85 prefix=""/>
+
+  <!-- Weld the gripper's base to the HC10DT flange. The canonical gripper's
+       base frame convention has +Z pointing out the gripper; align that with
+       tool0's +Z so the pads face the workspace. -->
+  <joint name="gripper_mount" type="fixed">
+    <parent link="tool0"/>
+    <child link="robotiq_arg2f_base_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+</robot>
