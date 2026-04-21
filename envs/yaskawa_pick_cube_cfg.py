@@ -107,8 +107,17 @@ class PickCubeSceneCfg(InteractiveSceneCfg):
             ),
             mass_props=sim_utils.MassPropertiesCfg(mass=0.05),
             collision_props=sim_utils.CollisionPropertiesCfg(),
+            # High friction models the real 2F-85's textured rubber pads
+            # against a painted/plastic cube (μ ~1.5). Without this, the
+            # cube could slip out of a marginal pinch during transport even
+            # at low accelerations. friction_combine_mode="max" ensures the
+            # contact actually uses this high value (PhysX default is
+            # "average", which halves it against any low-μ robot material).
             physics_material=sim_utils.RigidBodyMaterialCfg(
-                static_friction=0.9, dynamic_friction=0.8, restitution=0.0,
+                static_friction=1.5,
+                dynamic_friction=1.5,
+                restitution=0.0,
+                friction_combine_mode="max",
             ),
             visual_material=PreviewSurfaceCfg(diffuse_color=(0.8, 0.2, 0.2)),
         ),

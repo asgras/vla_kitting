@@ -60,14 +60,20 @@ HC10DT_ROBOTIQ_CFG = ArticulationCfg(
             max_linear_velocity=1000.0,
             max_angular_velocity=3666.0,
             enable_gyroscopic_forces=True,
-            solver_position_iteration_count=4,
-            solver_velocity_iteration_count=1,
+            # Gear_assembly reference used 4/1 which worked for its task, but
+            # our long scripted-pick transport (8+ s held grasp) needs tighter
+            # constraint convergence. The mimic chain has 5 dependent joints
+            # plus 2 pad-cube contact constraints that all must converge each
+            # step; too few iterations → the cube de-couples momentarily and
+            # drops mid-transport. Raising to 16/4 matches the cube's settings.
+            solver_position_iteration_count=16,
+            solver_velocity_iteration_count=4,
             max_contact_impulse=1e32,
         ),
         articulation_props=ArticulationRootPropertiesCfg(
             enabled_self_collisions=False,
-            solver_position_iteration_count=4,
-            solver_velocity_iteration_count=1,
+            solver_position_iteration_count=16,
+            solver_velocity_iteration_count=4,
         ),
         collision_props=CollisionPropertiesCfg(
             contact_offset=0.005, rest_offset=0.0,

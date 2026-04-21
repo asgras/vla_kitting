@@ -27,7 +27,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--num_demos", type=int, default=5)
 parser.add_argument("--dataset_file", type=str,
                     default=str(REPO / "datasets/teleop/cube_scripted.hdf5"))
-parser.add_argument("--max_steps_per_demo", type=int, default=800)
+parser.add_argument("--max_steps_per_demo", type=int, default=1600)
 parser.add_argument("--gui", action="store_true", default=False,
                     help="Run with Isaac Sim viewport visible (DCV display). Default is headless.")
 args_cli, _ = parser.parse_known_args()
@@ -99,62 +99,93 @@ def _quat_err_axis_angle(q_cur, q_des):
     return axis * angle
 
 
+# ----- Named pick/place locations (world frame) -----
+#
+# Heights are for the TOOL0 frame. On the RIA 2F-85 the grip surface
+# (left_inner_finger_pad) sits ~0.14 m below tool0 when the arm is fully
+# top-down. Cube spans z=[0, 0.05] (center 0.025). So to pinch the cube on
+# its midline we want pad_z ≈ 0.025 → tool0_z ≈ 0.165.
+PICK_APPROACH_Z = 0.40    # tool0 hover height (pad ~0.26 above table)
+PICK_GRASP_Z    = 0.17    # tool0 at grasp (pad ~0.03, cube-center height)
+# Transport height. 0.50 puts the HC10DT near full arm extension and the
+# differential-IK controller hits a singularity mid-swing (observed: EE
+# snapped 17 cm backward at phase 6 ~70%, flinging the cube). 0.40 keeps
+# the arm more bent — pad still sits 26 cm above the table (well above the
+# 10 cm success threshold).
+LIFT_Z          = 0.40
+PLACE_XY        = (0.65, 0.20)  # success target
+PLACE_APPROACH_Z = 0.40
+
+# Asymmetric-mimic-chain compensation. The PhysxMimicJointAPI on the RIA
+# 2F-85 closes one finger ~18 mm ahead of the other when driven from rest,
+# so closing on a centered cube consistently kicks it by -0.018 m in the
+# tool0-Y direction. Before the chase: only the trailing pad made contact,
+# giving a marginal grip that failed mid-transport (see phase 6 logs pre-
+# compensation). Pre-offsetting the EE target by +0.018 m in Y means the
+# faster pad has less travel, both pads reach the cube at the same time,
+# and the cube ends up centered. Only applied during descent + close, not
+# transport (where the EE goes to the fixed place target).
+GRIP_BIAS_Y = 0.018
+
+
 def script_trajectory_waypoints(cube_pos_w: "torch.Tensor") -> list[dict]:
-    """Generate the scripted trajectory waypoints given privileged cube pose.
+    """Generate the scripted pick-and-place trajectory.
 
-    Returns a list of {ee_pos, gripper, steps} dicts. All heights are for the
-    TOOL0 frame. Fingertip is +9.8 cm along tool0's local +Z axis (from URDF
-    chain tool0 -> base -> knuckle -> finger -> finger_tip at knuckle=0), so
-    when tool0 is oriented top-down the fingertip sits 9.8 cm below tool0 in
-    world Z. Table top is at z=0, cube spans z=[0, 0.05] (center 0.025).
+    Waypoints are consumed by an interpolating controller that ramps the EE
+    linearly between phase start and `ee_pos` over `steps` frames — giving
+    smooth, near-constant-velocity motion instead of saturated P-controller
+    snaps. `track` controls whether pick_xy is updated from the live cube
+    pose during that phase (needed for approach/descent alignment, MUST be
+    False once the gripper has contacted the cube).
 
-    Phase design: keep REORIENT and DESCEND strictly separate so the arm is
-    already fully top-down and XY-aligned before any vertical motion starts.
-    Otherwise the tilted fingertips sweep through the cube during phase 0.
+    Phase budget (total 1190 @ 60 Hz ≈ 20 s per demo):
+      A approach+reorient    140  TRACK   above cube, rotate to top-down
+      B hover settle          30  TRACK   kill residual drift
+      C slow descent         200  TRACK   straight down to grasp
+      D settle at grasp       40  --      let cube rest under open pads
+      E close gripper        180  --      pinch, EE frozen
+      F lift straight up     180  --      pure +Z to LIFT_Z
+      G transport to place   300  --      smooth XY swing above target
+      H hold at place        120  --      success detector needs 10 sustained
     """
     import torch
     cx, cy, _ = cube_pos_w.tolist()
+    tx, ty = PLACE_XY
 
-    # Place target well away from the pick column so the success region is
-    # unambiguous.
-    tx, ty = 0.65, 0.20
-
-    # Heights for the canonical (RIA) Robotiq 2F-85. The real grip surface is
-    # the inner_finger_pad (22×6.35×37.5 mm box, origin measured to sit
-    # ~0.14 m below tool0 when the arm is fully top-down). Cube spans
-    # z=[0, 0.05] (center 0.025). To pinch the cube centered on its midline
-    # we want pad_z ≈ 0.025 at the grasp pose, giving tool0_z ≈ 0.165.
-    # Approach is kept well above the cube to avoid dragging anything in.
-    #
-    #   approach_h = 0.35  -> pad at z≈0.21 (well above cube)
-    #   grasp_h    = 0.17  -> pad at z≈0.03 (center of cube), pad box
-    #                          extends z≈0.011-0.049, clear of table
-    #   lift_h     = 0.32  -> pad at z≈0.18 (17 cm above table)
-    approach_h = 0.35
-    grasp_h = 0.17
-    lift_h = 0.32
+    # Bias-compensated grasp Y (see GRIP_BIAS_Y comment).
+    gy = cy + GRIP_BIAS_Y
 
     # BinaryJointPositionAction: actions < 0 => CLOSE, >= 0 => OPEN. So
     # gripper = +1.0 is OPEN, -1.0 is CLOSE.
     return [
-        # A: rise/rotate to top-down above cube — the long phase that also
-        #    soaks up the ~45° home tilt. No descent below approach_h here.
-        {"ee_pos": torch.tensor([cx, cy, approach_h]), "gripper": +1.0, "steps": 140},
-        # B: settle at hover (kills residual XY drift before descent).
-        {"ee_pos": torch.tensor([cx, cy, approach_h]), "gripper": +1.0, "steps": 30},
-        # C: pure-vertical descent to grasp height (pads straddle cube sides).
-        {"ee_pos": torch.tensor([cx, cy, grasp_h]),    "gripper": +1.0, "steps": 100},
-        # D: close gripper in place. With MimicJointAPI driving the chain,
-        #    finger_joint needs moderate time to converge under contact.
-        {"ee_pos": torch.tensor([cx, cy, grasp_h]),    "gripper": -1.0, "steps": 120},
-        # E: lift with cube in hand.
-        {"ee_pos": torch.tensor([cx, cy, lift_h]),     "gripper": -1.0, "steps": 80},
-        # F: transport to the place target (stay closed). Extended to 300
-        #    steps (5 s at 60 Hz) so the EE moves gently — previous 120 steps
-        #    meant fast arm swings that jarred the cube out of the grip.
-        {"ee_pos": torch.tensor([tx, ty, lift_h]),     "gripper": -1.0, "steps": 300},
-        # G: hold at target so the success detector can fire.
-        {"ee_pos": torch.tensor([tx, ty, lift_h]),     "gripper": -1.0, "steps": 80},
+        # A: rise/rotate to top-down above cube.
+        {"ee_pos": torch.tensor([cx, gy, PICK_APPROACH_Z]), "gripper": +1.0, "steps": 140, "track": True},
+        # B: hover-settle above cube (bias-compensated).
+        {"ee_pos": torch.tensor([cx, gy, PICK_APPROACH_Z]), "gripper": +1.0, "steps": 30,  "track": True},
+        # C: slow pure-vertical descent to bias-compensated grasp.
+        {"ee_pos": torch.tensor([cx, gy, PICK_GRASP_Z]),    "gripper": +1.0, "steps": 200, "track": True},
+        # D: settle with pads straddling the cube. Tracking OFF — freezes
+        #    the EE so the cube can rest, and we commit to grasp xy now.
+        {"ee_pos": torch.tensor([cx, gy, PICK_GRASP_Z]),    "gripper": +1.0, "steps": 40,  "track": False},
+        # E: close gripper in place. Tracking OFF — if the close nudges the
+        #    cube, we do NOT chase it (chasing was the old feedback loop).
+        {"ee_pos": torch.tensor([cx, gy, PICK_GRASP_Z]),    "gripper": -1.0, "steps": 180, "track": False},
+        # F: lift straight up to LIFT_Z. Tracking OFF.
+        {"ee_pos": torch.tensor([cx, gy, LIFT_Z]),          "gripper": -1.0, "steps": 180, "track": False},
+        # G1-G3: transport split into three short segments. A single Cartesian
+        #    line from (pick, 0.40) to (place, 0.40) pushes the HC10DT through
+        #    an IK singularity mid-swing — observed EE jumping 45 cm backward
+        #    in one decile even at LIFT_Z=0.40. Broken into 3 × 200-step legs
+        #    the diff-IK controller stays in the same joint branch the whole
+        #    way. Intermediate points bias the Y motion first, then X, then
+        #    final approach — keeping the base-joint rotation monotonic.
+        {"ee_pos": torch.tensor([cx + (tx - cx) * 0.33, cy + (ty - cy) * 0.33 + GRIP_BIAS_Y, LIFT_Z]),
+         "gripper": -1.0, "steps": 200, "track": False},
+        {"ee_pos": torch.tensor([cx + (tx - cx) * 0.66, cy + (ty - cy) * 0.66 + GRIP_BIAS_Y, LIFT_Z]),
+         "gripper": -1.0, "steps": 200, "track": False},
+        {"ee_pos": torch.tensor([tx, ty, LIFT_Z]),          "gripper": -1.0, "steps": 200, "track": False},
+        # H: hold at place target so success detector fires.
+        {"ee_pos": torch.tensor([tx, ty, LIFT_Z]),          "gripper": -1.0, "steps": 120, "track": False},
     ]
 
 
@@ -208,13 +239,12 @@ def main() -> int:
         _log(f"  cube at ({cube_pos[0]:.3f}, {cube_pos[1]:.3f}, {cube_pos[2]:.3f})")
 
         waypoints = script_trajectory_waypoints(cube_pos)
-        # The first 5 waypoints (A-E: approach / hover / descent / close /
-        # lift) must track the cube's *current* XY before committing, because
-        # the descending gripper occasionally nudges the cube 5-10 mm before
-        # close. Without re-targeting, fingers close on the old XY and the
-        # cube slips past the pads. Phase indices F, G (transport + hold) use
-        # the fixed place target and should NOT follow the cube.
-        _TRACK_PHASES = {0, 1, 2, 3, 4}
+        # Each waypoint owns its own `track` flag (see script_trajectory_waypoints
+        # docstring). Approach/hover/descent track the live cube XY so the gripper
+        # aligns on the cube's actual position; settle/close/lift/transport/hold
+        # DON'T track — once the pads are around the cube we commit to the grasp
+        # pose, because per-step tracking during close created a feedback loop
+        # where a cube-kick would swing the EE, which would kick the cube further.
 
         # Target orientation: tool0 +Z pointing in world -Z (gripper fingers down).
         # Built as the Hamilton product qz(yaw=0) * qx(π) → (0, 1, 0, 0) in (w,x,y,z).
@@ -235,17 +265,23 @@ def main() -> int:
         success_reached = False
 
         for phase_idx, wp in enumerate(waypoints):
-            base_target_pos = wp["ee_pos"].to("cuda:0")
-            target_pos = base_target_pos.clone()
-            # Re-read cube XY right before each pick phase so a descent-time
-            # nudge doesn't leave the EE targeting the initial cube pose.
-            # (Per-step tracking below handles slides during close too.)
-            if phase_idx in _TRACK_PHASES:
-                live_cube = obs["policy"]["cube_pos"][0]
-                target_pos[0] = live_cube[0]
-                target_pos[1] = live_cube[1]
+            phase_end_pos = wp["ee_pos"].to("cuda:0").clone()
+            track = wp.get("track", False)
             gripper_cmd = wp["gripper"]
             phase_steps = wp["steps"]
+
+            # Lock in the EE's position at the start of this phase; linear
+            # interpolation from here to phase_end_pos gives smooth constant-
+            # velocity motion regardless of P-gain.
+            phase_start_pos = obs["policy"]["ee_pose"][0, :3].clone()
+
+            # If tracking, re-read cube XY once at phase start (per-step update
+            # happens in the inner loop). Apply the grip-bias Y compensation
+            # so the EE lines up for a symmetric close.
+            if track:
+                live_cube = obs["policy"]["cube_pos"][0]
+                phase_end_pos[0] = live_cube[0]
+                phase_end_pos[1] = live_cube[1] + GRIP_BIAS_Y
 
             phase_start_ee = obs["policy"]["ee_pose"][0]
             # Diagnostics on the RIA 2F-85 — finger_joint angle, and world-Z
@@ -261,9 +297,9 @@ def main() -> int:
             pad_z = _safe_z("left_inner_finger_pad")
             fingertip_z = _safe_z("left_inner_finger")
             _log(f"  phase {phase_idx}: EE ({phase_start_ee[0]:.2f},{phase_start_ee[1]:.2f},{phase_start_ee[2]:.2f}) -> "
-                 f"target ({target_pos[0]:.2f},{target_pos[1]:.2f},{target_pos[2]:.2f}) "
-                 f"grip={gripper_cmd} finger_q={finger_q:.2f}rad "
-                 f"fingertip_z={fingertip_z:.3f} pad_z={pad_z:.3f}")
+                 f"end ({phase_end_pos[0]:.2f},{phase_end_pos[1]:.2f},{phase_end_pos[2]:.2f}) "
+                 f"grip={gripper_cmd} track={track} steps={phase_steps} "
+                 f"finger_q={finger_q:.2f}rad fingertip_z={fingertip_z:.3f} pad_z={pad_z:.3f}")
 
             for step in range(phase_steps):
                 if total_steps >= args_cli.max_steps_per_demo:
@@ -273,14 +309,27 @@ def main() -> int:
                 cur_pos = current_ee[:3]
                 cur_quat = current_ee[3:7]
 
-                # Per-step cube tracking: in pick phases, the asymmetric
-                # Robotiq close can push the cube several mm during the close
-                # itself. Without per-step re-centering, EE targets a stale
-                # cube XY and fingers close around empty space on one side.
-                if phase_idx in _TRACK_PHASES:
+                # Per-step cube tracking (approach/descent only): live-update
+                # the phase endpoint XY so the descending gripper follows any
+                # cube nudge. Disabled for settle/close/lift/transport (once
+                # pads are committed around the cube).
+                if track:
                     live_cube = obs["policy"]["cube_pos"][0]
-                    target_pos[0] = live_cube[0]
-                    target_pos[1] = live_cube[1]
+                    phase_end_pos[0] = live_cube[0]
+                    phase_end_pos[1] = live_cube[1] + GRIP_BIAS_Y
+
+                # Smoothstep interpolation of the target across the phase:
+                # u = 3t² − 2t³, yielding zero velocity at both endpoints.
+                # Linear interpolation caused an impulsive deceleration at
+                # the end of transport that shook the cube loose; smoothstep
+                # ramps acceleration in and out so both the start and stop
+                # are gentle.
+                if phase_steps > 1:
+                    t = min(1.0, step / (phase_steps - 1))
+                else:
+                    t = 1.0
+                u = t * t * (3.0 - 2.0 * t)
+                target_pos = phase_start_pos + (phase_end_pos - phase_start_pos) * u
 
                 # Position: P-controller, saturates at 10 cm position error.
                 pos_err = target_pos - cur_pos
@@ -302,17 +351,28 @@ def main() -> int:
                 obs, reward, terminated, truncated, info = env.step(action)
                 total_steps += 1
 
-                # Diagnostic: at phase midpoint, report current vs target
+                # env auto-resets the sub-env when `terminated` OR `truncated` fires,
+                # so by this point `obs` reflects the post-reset state (cube back
+                # on the table, EE at home). Our only non-time-out termination is
+                # `cube_lifted_over_target`, so `terminated=True` means the demo
+                # just succeeded — record it and exit the phase loop immediately,
+                # BEFORE the (already-reset) post-reset cube pose makes the inline
+                # success check below fail.
+                if bool(terminated[0]) and not bool(truncated[0]):
+                    _log(f"    ++ phase {phase_idx} step {step}: success (terminated=True) "
+                         f"total_steps={total_steps}")
+                    success_reached = True
+                    break
+
+                # Diagnostic at phase midpoint: report EE pose, cube pose, finger_q.
+                # Reduced from full-decile logging once the transport was debugged.
                 if step == phase_steps // 2:
                     cur = obs["policy"]["ee_pose"][0, :3]
-                    cur_q = obs["policy"]["ee_pose"][0, 3:7]
-                    ang_err = float(torch.linalg.vector_norm(_quat_err_axis_angle(cur_q, q_target)))
                     cube_now = obs["policy"]["cube_pos"][0]
-                    grip_closed = obs["policy"]["gripper_closed"][0]
-                    _log(f"    phase {phase_idx} midway: EE ({cur[0]:.3f},{cur[1]:.3f},{cur[2]:.3f}) "
-                         f"ang_err={ang_err:.2f}rad "
+                    finger_q = float(robot.data.joint_pos[0, finger_idx])
+                    _log(f"    phase {phase_idx} mid: EE ({cur[0]:.3f},{cur[1]:.3f},{cur[2]:.3f}) "
                          f"cube ({cube_now[0]:.3f},{cube_now[1]:.3f},{cube_now[2]:.3f}) "
-                         f"grip_closed={grip_closed[0]:.1f}")
+                         f"finger_q={finger_q:.2f}")
 
                 # Track success (same logic as record_demos.py's process_success_condition)
                 if success_term is not None:

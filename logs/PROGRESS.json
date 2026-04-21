@@ -1,7 +1,7 @@
 {
   "current_phase": 7,
-  "completed": [0, 1, 2, 3, 4, 5, 6],
-  "blocked_on": "Scripted pick: cube NOW GETS LIFTED (z=0.153) after applying Isaac Lab gear_assembly reference config. Remaining issue is scripted trajectory design: cube gets knocked during close then dropped during transport. Gripper physics is now correct; scripted demo needs redesign.",
-  "last_update": "2026-04-21T02:25:00+00:00",
-  "notes": "Critical breakthrough found in this session: Isaac Lab's UR10e2F85GearAssemblyEnvCfg at isaaclab_tasks/manager_based/manipulation/deploy/gear_assembly/config/ur_10e/joint_pos_env_cfg.py provides the working 2F-85 config. Applied: gripper_finger stiffness 0.2->10 (50x), gripper_drive 40/1/10, disable_gravity=True on robot, contact_offset=0.005, drive_type=force on gripper joints. NVIDIA tutorial values (37.52/0.00125/1000 + mimic natFreq 2500) explored but don't work with our URDF-derived asset — gear_assembly values are what transfer."
+  "completed": [0, 1, 2, 3, 4, 5, 6, 7],
+  "blocked_on": null,
+  "last_update": "2026-04-21T13:15:00+00:00",
+  "notes": "Phase 7 DONE: 5/5 successful scripted pick-place demos. Redesigned trajectory: named constants (PICK_APPROACH_Z=0.40, PICK_GRASP_Z=0.17, LIFT_Z=0.40, PLACE_XY=0.65/0.20); smoothstep target interpolation; track-live-cube only on approach/descent; pre-close grip-bias compensation (GRIP_BIAS_Y=+0.018) fixes the Robotiq mimic-chain asymmetric close that used to shove the cube -18mm; split transport into 3 short legs to keep diff-IK inside a stable joint branch; robot solver iterations 4->16/1->4 to match cube; cube friction 0.9/0.8 -> 1.5/1.5 max-combine. The debugging-level breakthrough was spotting that the success term fires mid-transport (cube enters 8cm tolerance while still gripped), env auto-resets on terminated, and the loop's 10-step sustained-success check never triggered before the reset nuked the scene. Fix: treat `terminated and not truncated` as immediate success. Output at datasets/teleop/cube_scripted.hdf5 (215 MB, 5 episodes)."
 }
