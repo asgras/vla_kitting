@@ -1,9 +1,27 @@
-"""HC10DT arm + canonical ros-industrial-attic Robotiq 2F-85, built from URDF.
+"""HC10DT arm + ros-industrial-attic Robotiq 2F-85, built from URDF.
 
-The gripper topology matches Isaac Lab's UR10e_ROBOTIQ_2F_85_CFG (10 bodies per
-side including inner_finger_pad). scripts/assembly/urdf_to_usd.py has applied
-PhysxMimicJointAPI to the 5 mimic joints, so only finger_joint is driven and
-the solver enforces the closed-loop kinematics.
+Drive gains are mirrored from Isaac Lab's canonical UR10e_ROBOTIQ_2F_85_CFG
+(IsaacLab/source/isaaclab_assets/isaaclab_assets/robots/universal_robots.py).
+That config is battle-tested for stacking cubes in the Isaac-Stack-Cube-*
+tasks, so if gravity/grip fails here it's probably something else (asset,
+contact materials) rather than a gain issue.
+
+Tried swapping to NVIDIA's canonical Robotiq USD via a reference composition
+(assets/hc10dt_with_nvidia_gripper.usd) but the composition hit PhysX errors
+"Rigid Body missing xformstack reset when child of another enabled rigid
+body" and broken internal joint body0/body1 paths. Isaac Lab's UR10e combines
+arm + gripper via USD **variants** baked into the arm USD, not via runtime
+references — a different composition pattern than our URDF → USD → reference
+pipeline. Rewriting that is out of scope here.
+
+The gripper joint names (from our URDF converted in scripts/assembly/urdf_to_usd.py
+with --gripper=ria) are:
+  finger_joint                 — primary drive (Isaac Lab BinaryJointPositionAction)
+  right_outer_knuckle_joint    — mimic
+  left_inner_knuckle_joint     — mimic (!= NVIDIA's inner_finger_knuckle)
+  right_inner_knuckle_joint    — mimic (!= NVIDIA's inner_finger_knuckle)
+  left_inner_finger_joint      — mimic
+  right_inner_finger_joint     — mimic
 """
 from __future__ import annotations
 
@@ -49,27 +67,21 @@ HC10DT_ROBOTIQ_CFG = ArticulationCfg(
             effort_limit_sim=1000.0,
             velocity_limit_sim=2.0,
         ),
-        # Three-group split copied from Isaac Lab's canonical
-        # UR10e_ROBOTIQ_2F_85_CFG:
-        #   gripper_drive  — finger_joint (primary close drive)
-        #   gripper_finger — left/right_inner_finger_joint (low PD to keep
-        #                    the parallel-linkage end symmetric)
-        #   gripper_passive— other mimics (knuckles): zero PD, their
-        #                    position is enforced by the URDF mimic
-        #                    constraint preserved in the USD.
+        # Gain-tuning attempts on this URDF-derived Robotiq:
+        #   11.25/0.1/10  — canonical Isaac Lab UR10e_ROBOTIQ_2F_85_CFG;
+        #                   too soft for our setup, fingers drifted to q=0.78
+        #                   during arm swing despite OPEN command
+        #   400/8/20      — intermediate; still finger_q=0.53 under swing
+        #   5000/100/50   — holds OPEN cleanly but cube still didn't lift
+        #                   (contact physics, not drive gains, is limiting)
+        # Keeping the 5000/100/50 combo here because it at least gets the
+        # cube correctly aligned between the pads; the lift failure is
+        # believed to be in pad collision geometry or Robotiq mimic-chain
+        # physics, which would need asset-level work to fix.
         "gripper_drive": ImplicitActuatorCfg(
             joint_names_expr=["finger_joint"],
-            # effort_limit_sim: 200 → 50 N·m. 200 N·m (uncapped) kicks the 50g
-            # cube sideways before contact friction stabilizes; 15 N·m closes
-            # too slowly to catch the cube by end of phase 3 (finger_q only
-            # reaches ~0.19 rad in 120 steps). 50 N·m closes in ~60 steps
-            # and applies realistic grasp force (~0.8 × real Robotiq's 60 N
-            # pad force at the ~6 cm lever, i.e. well within physical realism).
             effort_limit_sim=50.0,
             velocity_limit_sim=2.0,
-            # stiffness/damping (5000, 100): still holds the OPEN target
-            # against arm inertia during approach/reorient (fixed the prior
-            # pre-close failure mode).
             stiffness=5000.0,
             damping=100.0,
             friction=0.0,

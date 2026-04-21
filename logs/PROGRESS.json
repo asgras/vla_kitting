@@ -1,7 +1,7 @@
 {
   "current_phase": 7,
   "completed": [0, 1, 2, 3, 4, 5, 6],
-  "blocked_on": "Phase 7 scripted pick still fails to LIFT the cube. Cube alignment problem fully fixed (yaw=0, gripper stiffness/effort, close target 0.65, per-step cube tracking) - cube stays perfectly centered between closed pads - but grip doesn't hold during lift. Fingers close past cube (finger_q reaches 0.67) meaning cube escapes before lift-off. Suspect Robotiq pad collision geometry or mimic-chain physics. See reports/phase_7_findings.md.",
-  "last_update": "2026-04-21T01:25:00+00:00",
-  "notes": "This session's iterations across 9 config variants (see logs/phase_7_rerun{1..9}*.log) resolved the cube-slides-during-close failure but surfaced a deeper grip-doesn't-hold-during-lift failure. Three paths forward documented: (P1) swap to NVIDIA Robotiq USD, (P2) fall back to human teleop (original Phase 6 plan) after fixing viewport freeze, (P3) tune PhysX solver iterations + contact offsets."
+  "blocked_on": "Scripted pick lift still fails. P1 (swap to NVIDIA Robotiq USD) tried and ruled out -- USD reference composition hits nested-rigid-body + broken joint path errors; Isaac Lab combines arm+gripper via USD variants, not references. Reverted to RIA gripper USD with stiffness=5000/damping=100/effort=50 (the only combo that reliably holds OPEN during the arm swing with our URDF-derived asset). Recommendation: pursue P2 (fix DCV viewport freeze and do human teleop) next session.",
+  "last_update": "2026-04-21T01:50:00+00:00",
+  "notes": "This session iterated across 9 scripted-pick config variants + P1 NVIDIA USD swap attempt + 3 gain-tuning variants. All Phase 7 findings consolidated in reports/phase_7_findings.md. Concrete paths forward: P2 teleop (primary), P3 author HC10DT USD with gripper variant, P4 rewrite compose script with flatten+xformstack fix, P5 inspect pad collision geometry once viewport is working."
 }

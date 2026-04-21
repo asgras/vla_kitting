@@ -86,22 +86,62 @@ have escaped the pads before the actual lift motion begins.
 5. **`enable_external_forces_every_iteration=True` on PhysxCfg** — sim
    logged a warning about this being off.
 
+## P1 (NVIDIA Robotiq USD) — tried and ruled out
+
+Loaded `assets/hc10dt_with_nvidia_gripper.usd` (a runtime-reference
+composition of the arm USD + NVIDIA's Robotiq 2F-85 USD built by
+`scripts/assembly/compose_arm_with_nvidia_gripper.py`). Immediately hit two
+fatal PhysX errors on env creation:
+
+- `Rigid Body of (/.../tool0/gripper/Robotiq_2F_85/base_link) missing
+  xformstack reset when child of another enabled rigid body
+  (/.../tool0)`: the gripper's base_link RigidBodyAPI is physically
+  parented under tool0, which also has RigidBodyAPI. Nested rigid
+  bodies are undefined in PhysX.
+- `PhysicsUSD: CreateJoint - no bodies defined at body0 and body1`:
+  every gripper joint's body0/body1 reference uses absolute paths that
+  weren't remapped into the composed scope. `finger_joint`,
+  `right_outer_knuckle_joint`, the four mimic rotX joints — all broken.
+
+Result: articulation init failed; the gripper's six joints weren't part
+of any articulation, so Isaac Lab's `ImplicitActuatorCfg` regexes didn't
+match and training aborted before a single physics step.
+
+Investigation showed Isaac Lab's canonical `UR10e_ROBOTIQ_2F_85_CFG` in
+`IsaacLab/source/isaaclab_assets/isaaclab_assets/robots/universal_robots.py`
+combines arm + gripper by selecting a **USD variant** baked into the arm
+USD (`spawn.variants = {"Gripper": "Robotiq_2f_85"}`), NOT by a runtime
+USD reference. That's a fundamentally different composition pattern than
+our URDF → USD → reference pipeline and would require authoring a new
+HC10DT USD with a gripper variant — out of scope for a quick tactical
+fix. Reverted to the RIA URDF-derived gripper USD.
+
+Silver lining: while reading the UR10e config, found canonical drive
+gains very different from ours (stiffness 11.25, damping 0.1, effort 10
+vs our 5000/100/50). Tried the canonical values with our asset: fingers
+immediately drifted to finger_q=0.78 rad under OPEN command during the
+arm's rapid phase-0 swing. Tried intermediate 400/8/20: fingers still
+drifted to 0.53. So Isaac Lab's canonical gains don't transfer to our
+asset (different mass properties in the URDF-derived USD). Kept
+5000/100/50 as the only combination that holds OPEN cleanly.
+
 ## Recommendation
 
-Given the pipeline-validation purpose of V1, three paths forward:
-
-- **(P1) Switch to the NVIDIA Robotiq USD** (hypothesis 2 above). Asset
-  swap; fastest experiment. If it works, immediately unblocks the rest
-  of the pipeline.
-- **(P2) Human teleop (original Phase 6 path).** V1's goal was always
-  validation via teleop→Mimic→train. Teleop bypasses the scripted
-  alignment problem entirely because a human can nudge the cube into
-  the grip via small corrections. We still need to unblock the viewport
-  freeze noted in `reports/phase_6_viewport_handoff.md` first, but that's
-  a known research problem with several concrete candidates.
-- **(P3) Increase PhysX solver fidelity + try contact offsets**
-  (hypotheses 3, 4, 5 above). Most risky — no guarantee these are the
-  right knobs.
-
-My lean is (P1) then (P2). (P3) is worth trying only after (P1) is ruled
-out, because it's speculative tuning without a clear physical hypothesis.
+- **(P2 — now the primary path) Human teleop.** V1's plan was always
+  teleop → Mimic → train. Teleop bypasses the scripted alignment
+  problem entirely because a human can nudge the EE so the pads make
+  solid contact. Blocker is the DCV viewport freeze from
+  `reports/phase_6_viewport_handoff.md` — has concrete research
+  candidates (warp symlink, kit-file edits) that are worth pursuing.
+- **(P3) Author a HC10DT USD with a Gripper variant** (the Isaac Lab
+  way). Bigger asset-authoring job but would let us reuse NVIDIA's
+  canonical Robotiq. Would fix the composition, but doesn't guarantee
+  the lift works — still might need P5 on top.
+- **(P4) Rewrite the compose script to flatten the stage** and fix the
+  xformstack issue. Less work than P3 but the xformstack-reset problem
+  with nested rigid bodies is nontrivial — PhysX really doesn't like
+  the tool0 → gripper/base_link parenting pattern even with flattening.
+- **(P5) Inspect the RIA gripper USD's pad collision geometry** by
+  opening it in the Isaac Sim viewer (once the viewport is unblocked).
+  If pad-cube contact regions don't look right, we can hand-edit the
+  collision meshes or use a convex hull approximation.
