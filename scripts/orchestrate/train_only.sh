@@ -40,10 +40,13 @@ TRAIN_STEPS=${TRAIN_STEPS:-1000}
 TRAIN_SAVE_FREQ=${TRAIN_SAVE_FREQ:-$TRAIN_STEPS}
 TRAIN_BATCH=${TRAIN_BATCH:-4}
 TRAIN_LR=${TRAIN_LR:-5e-5}
-EVAL_EPISODES=${EVAL_EPISODES:-2}
+EVAL_EPISODES=${EVAL_EPISODES:-1}
 EVAL_EVERY_N=${EVAL_EVERY_N:-5}
 USE_LORA=${USE_LORA:-1}
 LORA_R=${LORA_R:-16}
+
+# Budget watchdog. Set BUDGET_HOURS=0 to disable.
+BUDGET_HOURS=${BUDGET_HOURS:-0}
 
 # --- Paths ---
 LEROBOT_ROOT=$REPO/datasets/lerobot
@@ -112,10 +115,26 @@ _log "dataset: $LEROBOT_LIVE → $(readlink -f "$LEROBOT_LIVE" 2>/dev/null || ec
 FIXER_PID=$!
 _log "adapter_fixer pid=$FIXER_PID"
 
+WATCHDOG_PID=""
+if [[ "$BUDGET_HOURS" != "0" ]]; then
+  (
+    "$VENV_PY" "$REPO"/scripts/orchestrate/budget_watchdog.py \
+      --log-dir "$LOG_DIR" --budget-hours "$BUDGET_HOURS" \
+      > "$LOG_DIR/watchdog.out" 2>&1
+  ) &
+  WATCHDOG_PID=$!
+  _log "budget_watchdog pid=$WATCHDOG_PID budget=${BUDGET_HOURS}h"
+fi
+
 _cleanup() {
   _log "cleanup: stopping adapter_fixer pid=$FIXER_PID"
   kill "$FIXER_PID" 2>/dev/null || true
   wait "$FIXER_PID" 2>/dev/null || true
+  if [[ -n "$WATCHDOG_PID" ]]; then
+    _log "cleanup: stopping budget_watchdog pid=$WATCHDOG_PID"
+    kill "$WATCHDOG_PID" 2>/dev/null || true
+    wait "$WATCHDOG_PID" 2>/dev/null || true
+  fi
 }
 trap _cleanup EXIT
 
