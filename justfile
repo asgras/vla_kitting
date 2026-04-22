@@ -72,19 +72,111 @@ mimic-generate src="datasets/teleop/cube_annotated.hdf5" out="datasets/mimic/cub
         --headless \
         --enable_cameras
 
+# Drop failed/short demos from a raw scripted HDF5 and copy over the required
+# /data.env_args attr so the Mimic annotator works.
+clean-demos src="datasets/teleop/cube_scripted.hdf5" out="datasets/teleop/cube_scripted_clean.hdf5":
+    {{ISAAC_PY}} {{REPO}}/scripts/data/clean_demos.py \
+        --input {{REPO}}/{{src}} \
+        --output {{REPO}}/{{out}}
+
 # Inspect an Isaac Lab HDF5 dataset (demo count, lengths, action ranges, obs keys).
 inspect-demos path="datasets/teleop/cube_scripted.hdf5":
     {{ISAAC_PY}} {{REPO}}/scripts/data/inspect_demos.py {{REPO}}/{{path}}
 
+# Render a single demo (wrist + third-person stitched) to MP4.
+#   just render-demo                                      # demo 0 of cube_mimic_smoke
+#   just render-demo src=datasets/teleop/cube_scripted.hdf5 demo=5 out=reports/scripted_5.mp4
+render-demo src="datasets/mimic/cube_mimic_smoke.hdf5" demo="0" out="reports/demo.mp4":
+    {{REPO}}/.venv/bin/python {{REPO}}/scripts/data/render_demo.py \
+        --input {{REPO}}/{{src}} \
+        --demo {{demo}} \
+        --out {{REPO}}/{{out}} \
+        --side_by_side
+
+# GIF alternative — universally viewable (any browser, Slack, embed), bigger
+# file. Stride=4 + fps=15 keeps it under ~20 MB for a 1600-step demo.
+render-demo-gif src="datasets/mimic/cube_mimic_smoke.hdf5" demo="0" out="reports/demo.gif":
+    {{REPO}}/.venv/bin/python {{REPO}}/scripts/data/render_demo.py \
+        --input {{REPO}}/{{src}} \
+        --demo {{demo}} \
+        --out {{REPO}}/{{out}} \
+        --side_by_side --stride 4 --fps 15
+
 # ---------- Phase 10 (LeRobot conversion) ----------
 # Convert Isaac Lab HDF5 -> LeRobot v3 dataset for SmolVLA training.
 to-lerobot src="datasets/mimic/cube_mimic.hdf5" out="datasets/lerobot/cube_pick_v1" repo="vla_kitting/cube_pick_v1":
-    PYTHONPATH=/home/ubuntu/code/lerobot/src:$PYTHONPATH \
+    PYTHONPATH=/home/ubuntu/code/lerobot/src:${PYTHONPATH:-} \
       {{REPO}}/.venv/bin/python {{REPO}}/scripts/data/isaaclab_to_lerobot.py \
         --input {{REPO}}/{{src}} \
         --output {{REPO}}/{{out}} \
         --repo_id {{repo}} \
         --task "pick up the cube and place it on the green target"
+
+# ---------- Phase 11 (SmolVLA LoRA fine-tune) ----------
+# Tiny smoke training — 20 steps, validates the pipeline end-to-end.
+train-smoke:
+    PYTHONPATH=/home/ubuntu/code/lerobot/src:${PYTHONPATH:-} \
+      {{REPO}}/.venv/bin/python /home/ubuntu/code/lerobot/src/lerobot/scripts/lerobot_train.py \
+        --dataset.repo_id=vla_kitting/cube_pick_v1 \
+        --dataset.root={{REPO}}/datasets/lerobot/cube_pick_v1 \
+        --policy.type=smolvla \
+        --policy.pretrained_path=lerobot/smolvla_base \
+        --policy.repo_id=vla_kitting/cube_pick_v1 \
+        --policy.device=cuda \
+        --policy.push_to_hub=false \
+        --output_dir={{REPO}}/checkpoints/smoke \
+        --batch_size=2 --steps=20 --log_freq=5 --save_freq=10 \
+        --wandb.enable=false
+
+# ---------- Continual training orchestrator (see reports/continual_training_plan.md) ----------
+# Long-running loop: seed, then Mimic gen in background + SmolVLA training in
+# foreground, with training picking up new demos at each epoch. Logs to
+# logs/continual/*.log; stop with `touch logs/continual/STOP`.
+continual-train:
+    bash {{REPO}}/scripts/orchestrate/continual_train.sh
+
+continual-reset:
+    bash {{REPO}}/scripts/orchestrate/continual_train.sh --reset
+
+continual-status:
+    @jq . {{REPO}}/logs/continual/state.json 2>/dev/null || echo "no state.json yet"
+    @echo "--- last 5 Mimic batches ---"
+    @tail -5 {{REPO}}/logs/continual/batch_summary.jsonl 2>/dev/null | jq -c . || echo "(no batches yet)"
+    @echo "--- last 5 training epochs ---"
+    @tail -5 {{REPO}}/logs/continual/epoch_summary.jsonl 2>/dev/null | jq -c . || echo "(no epochs yet)"
+    @echo "--- GPU ---"
+    @nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader | head -5
+
+continual-stop:
+    touch {{REPO}}/logs/continual/STOP
+    @echo "STOP file created; loops will exit after their current iteration."
+
+# Run a trained SmolVLA checkpoint in closed-loop on the cube-pick env.
+# Writes side-by-side gif of first episode to reports/vla_rollout.gif.
+#   just run-vla                                      # latest smoke checkpoint
+#   just run-vla ckpt=checkpoints/cube_pick_v1/checkpoints/last/pretrained_model num=5 steps=1800
+run-vla ckpt="checkpoints/smoke/checkpoints/last/pretrained_model" num="2" steps="800" gif="reports/vla_rollout.gif":
+    PYTHONPATH=/home/ubuntu/code/lerobot/src:${PYTHONPATH:-} \
+      {{ISAAC_LAB}}/isaaclab.sh -p {{REPO}}/scripts/train/run_vla_closed_loop.py \
+        --checkpoint {{REPO}}/{{ckpt}} \
+        --num_episodes {{num}} --max_steps {{steps}} \
+        --save_gif {{REPO}}/{{gif}}
+
+# Full SmolVLA fine-tune on the LeRobot dataset. Override num steps with steps=N.
+train steps="20000" batch="8":
+    PYTHONPATH=/home/ubuntu/code/lerobot/src:${PYTHONPATH:-} \
+      {{REPO}}/.venv/bin/python /home/ubuntu/code/lerobot/src/lerobot/scripts/lerobot_train.py \
+        --dataset.repo_id=vla_kitting/cube_pick_v1 \
+        --dataset.root={{REPO}}/datasets/lerobot/cube_pick_v1 \
+        --policy.type=smolvla \
+        --policy.pretrained_path=lerobot/smolvla_base \
+        --policy.repo_id=vla_kitting/cube_pick_v1 \
+        --policy.device=cuda \
+        --policy.push_to_hub=false \
+        --output_dir={{REPO}}/checkpoints/cube_pick_v1 \
+        --batch_size={{batch}} --steps={{steps}} \
+        --log_freq=100 --save_freq=2000 \
+        --wandb.enable=false
 
 # ---------- Phase 6 ----------
 teleop display="1" num="15":

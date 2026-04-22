@@ -1,8 +1,8 @@
 """Render one episode from a demo HDF5 as an MP4 by stitching the recorded
 camera frames. No Isaac Sim required — just replays already-captured pixels.
 
-Usage:
-    /opt/IsaacSim/python.sh scripts/data/render_demo.py \\
+Usage (run with the repo .venv, which has imageio + imageio-ffmpeg):
+    .venv/bin/python scripts/data/render_demo.py \\
         --input datasets/mimic/cube_mimic_smoke.hdf5 \\
         --demo 0 \\
         --out reports/demo_0.mp4
@@ -14,9 +14,7 @@ from __future__ import annotations
 
 import argparse
 import pathlib
-import subprocess
 import sys
-import tempfile
 
 import h5py
 import numpy as np
@@ -33,6 +31,7 @@ def render(
     cam: str,
     side_by_side: bool,
     fps: int,
+    stride: int = 1,
 ) -> int:
     with h5py.File(input_path, "r") as f:
         demos = sorted(
@@ -68,18 +67,53 @@ def render(
                 return 1
             frames = obs[cam][...]
 
+    if stride > 1:
+        frames = frames[::stride]
+        _log(f"subsampled every {stride}th frame ({frames.shape[0]} of {T})")
     T, H, W, C = frames.shape
+
+    # GIF branch: imageio's pillow writer handles these in 2 lines.
+    if out_path.suffix.lower() == ".gif":
+        import imageio
+        imageio.mimsave(
+            str(out_path), list(frames), fps=fps, loop=0,
+        )
+        _log(f"wrote {out_path} ({out_path.stat().st_size / 1e6:.1f} MB)")
+        return 0
+
+    # Pad width/height up to the nearest multiple of 16 so the H.264 encoder
+    # doesn't emit a non-standard slice size — old/embedded decoders reject
+    # anything that isn't a macroblock-aligned frame (our 512x256 was fine but
+    # 384x256 side-by-side with just one cam is not, for example).
+    pad_w = (16 - W % 16) % 16
+    pad_h = (16 - H % 16) % 16
+    if pad_w or pad_h:
+        _log(f"padding frames {W}x{H} -> {W + pad_w}x{H + pad_h} for codec compat")
+        frames = np.pad(
+            frames, ((0, 0), (0, pad_h), (0, pad_w), (0, 0)), mode="constant"
+        )
+        H, W = frames.shape[1], frames.shape[2]
     _log(f"{demos[demo_idx]}: {T} frames at {W}x{H} -> {out_path}")
 
-    # Pipe raw frames into ffmpeg. Avoids pulling in imageio / av as a new dep.
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    # Use the ffmpeg binary bundled with imageio-ffmpeg directly — gives us
+    # explicit control over the H.264 profile + faststart flag.
+    import subprocess
+    from imageio_ffmpeg import get_ffmpeg_exe
+
+    ffmpeg = get_ffmpeg_exe()
     cmd = [
-        "ffmpeg", "-y", "-loglevel", "error",
+        ffmpeg, "-y", "-loglevel", "error",
         "-f", "rawvideo", "-pix_fmt", "rgb24",
         "-s", f"{W}x{H}", "-r", str(fps),
         "-i", "-",
-        "-c:v", "libx264", "-pix_fmt", "yuv420p",
-        "-preset", "veryfast", "-crf", "23",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-profile:v", "baseline",   # max compatibility (no B-frames, no CABAC)
+        "-level:v", "3.1",          # widely-supported level
+        "-preset", "veryfast",
+        "-crf", "22",
+        "-movflags", "+faststart",  # moov atom at the front for preview tools
         str(out_path),
     ]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
@@ -106,8 +140,11 @@ def main() -> int:
     ap.add_argument("--side_by_side", action="store_true", default=False,
                     help="Stitch wrist (upscaled) + third-person horizontally.")
     ap.add_argument("--fps", type=int, default=30)
+    ap.add_argument("--stride", type=int, default=1,
+                    help="Keep 1 of every N frames (GIFs get big fast; try 4).")
     args = ap.parse_args()
-    return render(args.input, args.demo, args.out, args.cam, args.side_by_side, args.fps)
+    return render(args.input, args.demo, args.out, args.cam, args.side_by_side,
+                  args.fps, args.stride)
 
 
 if __name__ == "__main__":

@@ -80,6 +80,17 @@ class PickCubeSceneCfg(InteractiveSceneCfg):
 
     # Wrist camera attached to the tool0 flange. The URDF importer nests bodies under
     # /Robot/root_joint/<link_name>/ rather than /Robot/<link_name>/.
+    #
+    # Mount: 8 cm along tool0's +X (outside the gripping plane), 5 cm along
+    # tool0's +Z, aimed back at the pad center (0, 0, 0.14). This positions
+    # the camera on the "open face" of the Robotiq 2F-85, looking past the
+    # inner knuckles and fingers at the grasp point. Earlier axial mounts
+    # (0, 0, 0.04) had the inner knuckles meeting at tool0's centerline
+    # (Δ≈±1.3 cm in Y at +Z=0.061) blocking the middle of the frame — giving
+    # the dreaded "two bright bars on a black background" view. Measured
+    # with /tmp/probe_tool0_geom.py.
+    # Quaternion computed via /tmp/cam_lookat.py with world_up=+X so that
+    # image "up" aligns with tool0's +X axis.
     wrist_cam = CameraCfg(
         prim_path="{ENV_REGEX_NS}/Robot/root_joint/tool0/wrist_cam",
         update_period=0.0,
@@ -87,15 +98,21 @@ class PickCubeSceneCfg(InteractiveSceneCfg):
         width=128,
         data_types=["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
-            focal_length=18.0, focus_distance=400.0, horizontal_aperture=20.955,
+            focal_length=12.0, focus_distance=400.0, horizontal_aperture=20.955,
             clipping_range=(0.02, 3.0),
         ),
         offset=CameraCfg.OffsetCfg(
-            pos=(0.0, 0.0, 0.10), rot=(0.0, 0.707, 0.707, 0.0), convention="ros"
+            pos=(0.08, 0.0, 0.05),
+            rot=(0.66095, -0.25129, -0.25129, 0.66095),
+            convention="ros",
         ),
     )
 
-    # Third-person overhead camera fixed in the env
+    # Third-person overhead camera fixed in the env. Re-aimed at the workspace
+    # center (0.60, 0.10, 0.02) from (1.15, 0.1, 0.5) — the prior pose at
+    # (1.3, 0, 1.0) with a shallow 30° tilt overshot the table by ~45 cm and
+    # centered on the robot body. Rotation computed by /tmp/cam_lookat.py so
+    # the target marker at (0.65, 0.20) sits squarely in-frame.
     third_person_cam = CameraCfg(
         prim_path="{ENV_REGEX_NS}/third_person_cam",
         update_period=0.0,
@@ -107,7 +124,8 @@ class PickCubeSceneCfg(InteractiveSceneCfg):
             clipping_range=(0.1, 5.0),
         ),
         offset=CameraCfg.OffsetCfg(
-            pos=(1.3, 0.0, 1.0), rot=(0.35355, -0.61237, -0.61237, 0.35355),
+            pos=(1.15, 0.10, 0.50),
+            rot=(-0.2926, 0.64373, 0.64373, -0.2926),
             convention="ros",
         ),
     )
