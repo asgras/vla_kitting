@@ -220,6 +220,14 @@ phase_convert() {
     --task "pick up the cube and place it on the green target" \
     2>&1 | tee -a "$MIMIC_LOG" | tail -10
 
+  # Atomic-ish symlink replace. `mv -Tf` can replace a symlink-to-symlink but
+  # refuses when the target is a real directory (which can happen if a
+  # previous run crashed between `rm` and this swap). Handle that case
+  # explicitly: if $LEROBOT_LIVE is a non-symlink path, remove it first.
+  if [[ -e "$LEROBOT_LIVE" && ! -L "$LEROBOT_LIVE" ]]; then
+    _log "[convert] removing stale non-symlink at $LEROBOT_LIVE"
+    rm -rf "$LEROBOT_LIVE"
+  fi
   ln -sfn "$dst" "$LEROBOT_LIVE.next"
   mv -Tf "$LEROBOT_LIVE.next" "$LEROBOT_LIVE"
   _log "[convert] cube_pick_v1 symlink → $dst"
