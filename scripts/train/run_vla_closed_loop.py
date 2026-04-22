@@ -33,6 +33,11 @@ parser.add_argument("--task", type=str,
                     default="pick up the cube and place it on the green target")
 parser.add_argument("--save_gif", type=str, default=None,
                     help="Optional: write a side-by-side gif of the first episode here.")
+parser.add_argument("--jsonl_out", type=str, default=None,
+                    help="Optional: append per-episode structured results here.")
+parser.add_argument("--ckpt_tag", type=str, default=None,
+                    help="Optional short tag stamped on every JSONL record "
+                         "(e.g. 'epoch_0023').")
 parser.add_argument("--device", type=str, default="cuda")
 args_cli, _ = parser.parse_known_args()
 
@@ -73,7 +78,16 @@ def _obs_env_to_lerobot(env_obs: dict) -> dict:
     }
 
 
+def _append_jsonl(path: pathlib.Path, record: dict) -> None:
+    import json
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as f:
+        f.write(json.dumps(record) + "\n")
+
+
 def main() -> int:
+    import datetime as dt
+    import json
     import numpy as np
     import torch
     import gymnasium as gym
@@ -144,6 +158,7 @@ def main() -> int:
         _log(f"=== episode {ep} | cube at ({cube0[0]:.3f}, {cube0[1]:.3f}, {cube0[2]:.3f})")
 
         success_this_ep = False
+        truncated_this_ep = False
         for step in range(args_cli.max_steps):
             # Build an inference frame matching the dataset schema, then
             # preprocess (normalize images, tokenize task string).
@@ -176,10 +191,27 @@ def main() -> int:
                 success_this_ep = True
                 break
             if bool(truncated[0]):
+                truncated_this_ep = True
                 break
 
         successes += int(success_this_ep)
         _log(f"    episode {ep} result: {'SUCCESS' if success_this_ep else 'FAIL'} after {step + 1} steps")
+
+        # Emit per-episode structured record so the orchestrator can plot
+        # success rate / cube drop patterns / episode length separately.
+        if args_cli.jsonl_out:
+            cube_end = obs_env["policy"]["cube_pos"][0].detach().cpu().tolist()
+            result = "success" if success_this_ep else ("timeout" if truncated_this_ep else "fail")
+            _append_jsonl(pathlib.Path(args_cli.jsonl_out), {
+                "ts": dt.datetime.utcnow().isoformat() + "Z",
+                "ckpt": args_cli.checkpoint,
+                "ckpt_tag": args_cli.ckpt_tag,
+                "ep": ep,
+                "result": result,
+                "steps": step + 1,
+                "cube_start": [float(x) for x in cube0],
+                "cube_end": [float(x) for x in cube_end],
+            })
 
         if ep == 0 and args_cli.save_gif and gif_frames and not saved_gif:
             import imageio
