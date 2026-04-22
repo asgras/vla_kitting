@@ -21,7 +21,9 @@ def cube_lifted_over_target(
 ) -> torch.Tensor:
     """Success when cube is > min_height above the table (z=0 plane) AND within xy_tolerance of target."""
     cube: RigidObject = env.scene[object_cfg.name]
-    pos = cube.data.root_pos_w  # (N, 3)
+    # Env-local cube pos so target_xy is per-env (target_marker is spawned
+    # per-env at these local coords; envs 1+ have nonzero origins).
+    pos = cube.data.root_pos_w - env.scene.env_origins  # (N, 3)
     height_ok = pos[:, 2] > min_height
     tx, ty = target_xy
     dx = pos[:, 0] - tx
@@ -47,7 +49,8 @@ def cube_placed_at_target(
     success only fires after the fingers open and the cube settles.
     """
     cube: RigidObject = env.scene[object_cfg.name]
-    pos = cube.data.root_pos_w
+    # Env-local cube pos so target_xy is per-env (see note in cube_lifted_over_target).
+    pos = cube.data.root_pos_w - env.scene.env_origins
     lin_vel = cube.data.root_lin_vel_w
     tx, ty = target_xy
     dx = pos[:, 0] - tx

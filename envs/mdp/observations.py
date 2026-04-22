@@ -99,7 +99,9 @@ def cube_above_target_xy(
     """Subtask 3 signal: cube has been transported above the output target,
     still held high. Fires during the transport hold / just before descent."""
     cube: RigidObject = env.scene[object_cfg.name]
-    pos = cube.data.root_pos_w
+    # Subtract per-env origin so target_xy is interpreted in each env's local
+    # frame — otherwise with num_envs>1 only env_0 ever registers the signal.
+    pos = cube.data.root_pos_w - env.scene.env_origins
     tx, ty = target_xy
     dx = pos[:, 0] - tx
     dy = pos[:, 1] - ty

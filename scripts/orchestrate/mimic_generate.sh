@@ -27,6 +27,7 @@ VENV_PY=$REPO/.venv/bin/python
 # --- Knobs (override via env) ---
 SEED_DEMOS=${SEED_DEMOS:-25}
 MIMIC_BATCH=${MIMIC_BATCH:-25}
+MIMIC_NUM_ENVS=${MIMIC_NUM_ENVS:-1}
 MIMIC_TARGET_DEMOS=${MIMIC_TARGET_DEMOS:-150}
 MIMIC_BUDGET_HOURS=${MIMIC_BUDGET_HOURS:-4}
 
@@ -162,8 +163,7 @@ mimic_loop() {
       --input_file "$ANNOTATED" \
       --output_file "$batch_file" \
       --generation_num_trials "$MIMIC_BATCH" \
-      --num_envs 1 --headless --enable_cameras 2>&1 | tail -200 \
-      >> "$MIMIC_LOG"
+      --num_envs "$MIMIC_NUM_ENVS" --headless --enable_cameras >> "$MIMIC_LOG" 2>&1
     local rc=$?
     set -e
     if [[ $rc -ne 0 ]]; then
@@ -201,10 +201,30 @@ PY
 phase_convert() {
   _log "=== Phase 3: LeRobot conversion ==="
 
+  if [[ "${SKIP_CONVERT:-0}" == "1" ]]; then
+    _log "[convert] SKIP_CONVERT=1; not rebuilding LeRobot dataset"
+    return
+  fi
+
   local total=$(_count_master_demos)
   if (( total == 0 )); then
     _log "[convert] master has 0 demos; skipping conversion"
     return
+  fi
+
+  # Skip if master file hasn't changed since the currently-pointed LeRobot
+  # dataset was built — avoids 15-min convert-to-duplicate when an early
+  # STOP exits before any new Mimic demos were produced.
+  if [[ -L "$LEROBOT_LIVE" ]]; then
+    local current_ds=$(readlink -f "$LEROBOT_LIVE")
+    if [[ -f "$current_ds/meta/info.json" && -f "$MASTER" ]]; then
+      local ds_mtime=$(stat -c %Y "$current_ds/meta/info.json" 2>/dev/null || echo 0)
+      local master_mtime=$(stat -c %Y "$MASTER" 2>/dev/null || echo 0)
+      if (( master_mtime <= ds_mtime )); then
+        _log "[convert] master unchanged since $current_ds was built; skipping"
+        return
+      fi
+    fi
   fi
 
   # Versioned output dir + atomic symlink swap. Unlike the old interleaved
@@ -252,7 +272,7 @@ PY
 # ============================================================
 _log "=========================================================="
 _log "mimic_generate.sh starting (pid=$$)"
-_log "  SEED_DEMOS=$SEED_DEMOS MIMIC_BATCH=$MIMIC_BATCH"
+_log "  SEED_DEMOS=$SEED_DEMOS MIMIC_BATCH=$MIMIC_BATCH MIMIC_NUM_ENVS=$MIMIC_NUM_ENVS"
 _log "  MIMIC_TARGET_DEMOS=$MIMIC_TARGET_DEMOS MIMIC_BUDGET_HOURS=$MIMIC_BUDGET_HOURS"
 _log "=========================================================="
 
