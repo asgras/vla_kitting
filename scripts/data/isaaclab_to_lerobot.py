@@ -135,15 +135,6 @@ def _build_ee_pose(demo: h5py.Group) -> np.ndarray:
     raise KeyError("demo has neither (eef_pos + eef_quat) nor ee_pose")
 
 
-def _build_gripper(demo: h5py.Group) -> np.ndarray:
-    """(T, 1) finger-joint position. Falls back to gripper_closed binary."""
-    if "gripper_pos" in demo["obs"]:
-        return demo["obs"]["gripper_pos"][...].astype(np.float32).reshape(-1, 1)
-    if "gripper_closed" in demo["obs"]:
-        return demo["obs"]["gripper_closed"][...].astype(np.float32).reshape(-1, 1)
-    raise KeyError("demo has neither gripper_pos nor gripper_closed")
-
-
 def convert(
     src_path: pathlib.Path,
     dst_root: pathlib.Path,
@@ -194,7 +185,6 @@ def convert(
 
             state = demo["obs"]["joint_pos"][...].astype(np.float32)
             ee_pose = _build_ee_pose(demo)
-            gripper = _build_gripper(demo)
             cube_pos = demo["obs"]["cube_pos"][...].astype(np.float32)
             wrist = demo["obs"]["wrist_cam"][...]
             third = demo["obs"]["third_person_cam"][...]

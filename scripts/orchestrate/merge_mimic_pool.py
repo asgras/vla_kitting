@@ -17,6 +17,11 @@ import pathlib
 
 import h5py
 
+# Drop demos shorter than this many action steps — they're leftovers from
+# runs that timed out before reaching the success phase. Same threshold as
+# scripts/data/clean_demos.py.
+MIN_DEMO_LEN = 100
+
 
 def _log(msg: str) -> None:
     print(f"[merge] {msg}", flush=True)
@@ -65,7 +70,7 @@ def merge(pool_dir: pathlib.Path, out_path: pathlib.Path) -> int:
                         if not success:
                             total_dropped += 1
                             continue
-                        if "actions" not in g or g["actions"].shape[0] < 100:
+                        if "actions" not in g or g["actions"].shape[0] < MIN_DEMO_LEN:
                             total_dropped += 1
                             continue
                         new_name = f"demo_{total_kept}"

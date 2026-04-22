@@ -23,7 +23,9 @@ import pathlib
 import h5py
 
 
-MIN_LEN = 100  # drop demos with fewer action steps than this
+# Drop demos shorter than this many action steps — they're leftovers from
+# runs that timed out before reaching the success phase.
+MIN_LEN = 100
 
 
 def clean(src: pathlib.Path, dst: pathlib.Path) -> int:
