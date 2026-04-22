@@ -64,7 +64,24 @@ def fix_pretrained_model_dir(pm_dir: pathlib.Path) -> list[str]:
         if _rewrite_json(adapter_cfg, {"base_model_name_or_path": TARGET_BASE}):
             changes.append(f"adapter_config.base_model→{TARGET_BASE}")
 
+    # LeRobot only writes config.json on the fresh-start save; resume-saved
+    # checkpoints get adapter_config.json + train_config.json but no
+    # config.json. Derive it from train_config.json's .policy section so
+    # run_vla_closed_loop.py's `PreTrainedConfig.from_pretrained` works.
     policy_cfg = pm_dir / "config.json"
+    train_cfg = pm_dir / "train_config.json"
+    if not policy_cfg.exists() and train_cfg.exists():
+        try:
+            tc = json.loads(train_cfg.read_text())
+            policy = tc.get("policy")
+            if isinstance(policy, dict):
+                # Make sure the dispatch key is present.
+                policy.setdefault("type", POLICY_TYPE)
+                policy_cfg.write_text(json.dumps(policy, indent=2))
+                changes.append("config.json←train_config.policy")
+        except (OSError, json.JSONDecodeError):
+            pass
+
     if policy_cfg.exists():
         if _rewrite_json(policy_cfg, {"type": POLICY_TYPE}):
             changes.append(f"config.type→{POLICY_TYPE}")
