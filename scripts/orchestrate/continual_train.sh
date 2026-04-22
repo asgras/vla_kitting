@@ -19,12 +19,14 @@ VENV_PY=$REPO/.venv/bin/python
 
 # --- Knobs (override via env) ---
 SEED_DEMOS=${SEED_DEMOS:-25}
-MIMIC_MIN_DEMOS=${MIMIC_MIN_DEMOS:-40}
+MIMIC_MIN_DEMOS=${MIMIC_MIN_DEMOS:-20}
 MIMIC_BATCH=${MIMIC_BATCH:-25}
 TRAIN_STEPS=${TRAIN_STEPS:-1000}
 TRAIN_BATCH=${TRAIN_BATCH:-4}
 EVAL_EPISODES=${EVAL_EPISODES:-2}
 EVAL_EVERY_N=${EVAL_EVERY_N:-5}
+USE_LORA=${USE_LORA:-1}
+LORA_R=${LORA_R:-16}
 
 # --- Paths ---
 TELEOP=$REPO/datasets/teleop
@@ -192,6 +194,11 @@ mimic_loop() {
         # Atomic symlink swap.
         ln -sfn "$snapshot" "$LEROBOT_LIVE.next"
         mv -Tf "$LEROBOT_LIVE.next" "$LEROBOT_LIVE"
+
+        # Disk hygiene: keep only the 3 most-recent snapshots. Older ones
+        # aren't needed once the symlink has moved on.
+        ls -dt "$LEROBOT_ROOT"/cube_pick_v1_batch_* 2>/dev/null \
+          | tail -n +4 | xargs -r rm -rf
       fi
 
       # Append JSONL summary and update state.json.
@@ -261,14 +268,27 @@ train_loop() {
     )
 
     if [[ -e "$CKPT_DIR/checkpoints/last" ]]; then
-      # Resume from last checkpoint; LeRobot reads TrainPipelineConfig from
-      # the existing output_dir, so we only need --config_path.
-      train_args+=(--config_path="$CKPT_DIR" --resume=true)
+      # Resume from last checkpoint. LeRobot computes policy_dir = Path(config_path).parent
+      # (no symlink resolution) and passes that as pretrained_path to PEFT. So we must
+      # point config_path at the train_config.json FILE inside pretrained_model/ — not the
+      # dir itself — so that .parent lands on pretrained_model/ where adapter_config.json lives.
+      local resume_cfg_path="$CKPT_DIR/checkpoints/last/pretrained_model/train_config.json"
+      train_args+=(--config_path="$resume_cfg_path" --resume=true)
       _log "[train] resuming from $CKPT_DIR/checkpoints/last"
     else
-      # First epoch — fresh SmolVLA-base.
+      # First epoch — fresh SmolVLA-base. LeRobot refuses to write into an
+      # existing non-empty dir with resume=false, so scrub any empty dir
+      # created by our top-level mkdir -p.
+      if [[ -d "$CKPT_DIR" && -z "$(ls -A "$CKPT_DIR")" ]]; then
+        rmdir "$CKPT_DIR"
+      fi
       train_args+=(--policy.type=smolvla --policy.pretrained_path=lerobot/smolvla_base)
-      _log "[train] fresh start from lerobot/smolvla_base"
+      if [[ "$USE_LORA" == "1" ]]; then
+        train_args+=(--peft.method_type=LORA --peft.r="$LORA_R")
+        _log "[train] fresh start from lerobot/smolvla_base + LoRA r=$LORA_R"
+      else
+        _log "[train] fresh start from lerobot/smolvla_base (full fine-tune)"
+      fi
     fi
 
     set +e

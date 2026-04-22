@@ -95,7 +95,29 @@ def main() -> int:
     device = torch.device(args_cli.device)
 
     _log(f"loading SmolVLA from {args_cli.checkpoint}")
-    policy = SmolVLAPolicy.from_pretrained(args_cli.checkpoint)
+    ckpt_path = pathlib.Path(args_cli.checkpoint)
+    adapter_cfg_file = ckpt_path / "adapter_config.json"
+    if adapter_cfg_file.exists():
+        # PEFT/LoRA checkpoint: adapter_config.json points to a base model on
+        # the HF hub. The LOCAL config.json has the task-specific input_features
+        # (our 2-cam wrist+third_person setup) — not the HF default 3-cam setup
+        # — so we must use it to instantiate the policy.
+        from peft import PeftModel
+        from peft import PeftConfig as HfPeftConfig
+        from lerobot.configs.policies import PreTrainedConfig
+
+        hf_peft_cfg = HfPeftConfig.from_pretrained(str(ckpt_path))
+        base_src = hf_peft_cfg.base_model_name_or_path
+        # PreTrainedConfig.from_pretrained dispatches to the right subclass
+        # via the 'type' field in config.json (must exist; injected manually
+        # if lerobot's PEFT save path dropped it).
+        local_cfg = PreTrainedConfig.from_pretrained(str(ckpt_path))
+        _log(f"  PEFT detected: base={base_src}, adapter={ckpt_path}")
+        _log(f"  using local config with input_features={list(local_cfg.input_features.keys())}")
+        base_policy = SmolVLAPolicy.from_pretrained(base_src, config=local_cfg)
+        policy = PeftModel.from_pretrained(base_policy, str(ckpt_path))
+    else:
+        policy = SmolVLAPolicy.from_pretrained(str(ckpt_path))
     policy.to(device)
     policy.eval()
 
