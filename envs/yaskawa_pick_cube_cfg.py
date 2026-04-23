@@ -302,7 +302,12 @@ class YaskawaPickCubeIkRelEnvCfg(ManagerBasedRLEnvCfg):
     commands = None
 
     def __post_init__(self):
-        self.decimation = 2
+        # 120 Hz physics / decimation 8 → 15 Hz policy rate. Cameras capture at
+        # render_interval=decimation so one image frame == one policy step.
+        # (Was decimation=2 → 60 Hz; dropped to 15 Hz after the 60 Hz training
+        # run plateaued — the vast majority of 60 Hz frames were near-duplicates
+        # diluting the gradient signal.)
+        self.decimation = 8
         self.episode_length_s = 30.0
         self.sim.dt = 1.0 / 120.0
         self.sim.render_interval = self.decimation

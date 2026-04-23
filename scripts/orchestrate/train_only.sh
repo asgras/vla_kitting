@@ -21,11 +21,15 @@
 #   TRAIN_STEPS          steps per epoch call            (default 1000)
 #   TRAIN_SAVE_FREQ      save_freq within each call      (default =TRAIN_STEPS)
 #   TRAIN_BATCH          batch size                      (default 4)
-#   TRAIN_LR             constant learning rate          (default 5e-5)
-#   EVAL_EPISODES        rollouts per eval               (default 2)
-#   EVAL_EVERY_N         eval every N epochs             (default 5)
+#   TRAIN_LR             constant learning rate          (default 1e-4)
+#   EVAL_EPISODES        rollouts per eval               (default 10)
+#   EVAL_EVERY_N         eval every N epochs             (default 10)
 #   USE_LORA             1/0 for LoRA                    (default 1)
-#   LORA_R               LoRA rank                       (default 16)
+#   LORA_R               LoRA rank                       (default 32)
+#   LORA_ALPHA           LoRA alpha (scaling)            (default 32)
+#   LORA_DROPOUT         LoRA dropout                    (default 0.05)
+#   LORA_TARGETS_REGEX   regex of module names to adapt  (default: q,k,v,o + gate,up,down in lm_expert)
+#   N_ACTION_STEPS       action-chunk steps executed     (default 12)
 
 set -euo pipefail
 export LC_ALL=C.UTF-8
@@ -39,11 +43,18 @@ VENV_PY=$REPO/.venv/bin/python
 TRAIN_STEPS=${TRAIN_STEPS:-1000}
 TRAIN_SAVE_FREQ=${TRAIN_SAVE_FREQ:-$TRAIN_STEPS}
 TRAIN_BATCH=${TRAIN_BATCH:-4}
-TRAIN_LR=${TRAIN_LR:-5e-5}
+TRAIN_LR=${TRAIN_LR:-1e-4}
 EVAL_EPISODES=${EVAL_EPISODES:-10}
 EVAL_EVERY_N=${EVAL_EVERY_N:-10}
 USE_LORA=${USE_LORA:-1}
-LORA_R=${LORA_R:-16}
+LORA_R=${LORA_R:-32}
+LORA_ALPHA=${LORA_ALPHA:-32}
+LORA_DROPOUT=${LORA_DROPOUT:-0.05}
+# Broader target than the SmolVLA default (q,v only): adapt all attention
+# projections plus the FFN in the action expert, keeping the VLM backbone
+# frozen. Still excludes the vision tower and the LM head.
+LORA_TARGETS_REGEX=${LORA_TARGETS_REGEX:-"(model\.vlm_with_expert\.lm_expert\..*\.(q|k|v|o|gate|up|down)_proj|model\.(state_proj|action_in_proj|action_out_proj|action_time_mlp_in|action_time_mlp_out))"}
+N_ACTION_STEPS=${N_ACTION_STEPS:-12}
 
 # Budget watchdog. Set BUDGET_HOURS=0 to disable.
 BUDGET_HOURS=${BUDGET_HOURS:-0}
@@ -120,6 +131,7 @@ if [[ "$BUDGET_HOURS" != "0" ]]; then
   (
     "$VENV_PY" "$REPO"/scripts/orchestrate/budget_watchdog.py \
       --log-dir "$LOG_DIR" --budget-hours "$BUDGET_HOURS" \
+      --grace-minutes "$(echo "$BUDGET_HOURS * 60" | bc -l | cut -d. -f1)" \
       > "$LOG_DIR/watchdog.out" 2>&1
   ) &
   WATCHDOG_PID=$!
@@ -143,7 +155,9 @@ trap _cleanup EXIT
 # ============================================================
 _log "=== training loop starting ==="
 _log "  TRAIN_STEPS=$TRAIN_STEPS SAVE_FREQ=$TRAIN_SAVE_FREQ BATCH=$TRAIN_BATCH LR=$TRAIN_LR"
-_log "  EVAL_EVERY_N=$EVAL_EVERY_N EVAL_EPISODES=$EVAL_EPISODES USE_LORA=$USE_LORA LORA_R=$LORA_R"
+_log "  EVAL_EVERY_N=$EVAL_EVERY_N EVAL_EPISODES=$EVAL_EPISODES USE_LORA=$USE_LORA"
+_log "  LORA_R=$LORA_R LORA_ALPHA=$LORA_ALPHA LORA_DROPOUT=$LORA_DROPOUT N_ACTION_STEPS=$N_ACTION_STEPS"
+_log "  LORA_TARGETS_REGEX=$LORA_TARGETS_REGEX"
 
 epoch=$(jq -r '.epoch // 0' "$STATE_JSON" 2>/dev/null || echo 0)
 
@@ -196,10 +210,20 @@ while true; do
       --policy.scheduler_warmup_steps=0
       --policy.scheduler_decay_steps=1000000
       --policy.scheduler_decay_lr="$TRAIN_LR"
+      # n_action_steps controls how many predicted actions are executed
+      # before the policy re-queries. At 15 Hz we want ~0.8 s lookahead so
+      # the default 50 (= 3.3 s) is too coarse.
+      --policy.n_action_steps="$N_ACTION_STEPS"
     )
     if [[ "$USE_LORA" == "1" ]]; then
-      train_args+=(--peft.method_type=LORA --peft.r="$LORA_R")
-      _log "fresh start from lerobot/smolvla_base + LoRA r=$LORA_R, constant LR=$TRAIN_LR"
+      train_args+=(
+        --peft.method_type=LORA
+        --peft.r="$LORA_R"
+        --peft.lora_alpha="$LORA_ALPHA"
+        --peft.lora_dropout="$LORA_DROPOUT"
+        --peft.target_modules="$LORA_TARGETS_REGEX"
+      )
+      _log "fresh start from lerobot/smolvla_base + LoRA r=$LORA_R alpha=$LORA_ALPHA dropout=$LORA_DROPOUT, constant LR=$TRAIN_LR"
     else
       _log "fresh start from lerobot/smolvla_base (full fine-tune), constant LR=$TRAIN_LR"
     fi
@@ -233,10 +257,12 @@ while true; do
     eval_gif="$CKPT_DIR/eval_epoch_$(printf '%04d' "$epoch").gif"
     eval_log="$LOG_DIR/eval_epoch_$(printf '%04d' "$epoch").out"
     set +e
+    # max_steps 450 = 30 s at 15 Hz policy rate (match the env's
+    # episode_length_s=30). Was 1800 when the policy ran at 60 Hz.
     PYTHONPATH="$LEROBOT_SRC:${PYTHONPATH:-}" "$ISAAC_LAB"/isaaclab.sh \
       -p "$REPO"/scripts/train/run_vla_closed_loop.py \
       --checkpoint "$last_ckpt" \
-      --num_episodes "$EVAL_EPISODES" --max_steps 1800 \
+      --num_episodes "$EVAL_EPISODES" --max_steps 450 \
       --save_gif "$eval_gif" \
       --jsonl_out "$LOG_DIR/eval_episodes.jsonl" \
       --ckpt_tag "epoch_$(printf '%04d' "$epoch")" \

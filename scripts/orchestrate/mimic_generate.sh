@@ -174,7 +174,7 @@ mimic_loop() {
     if [[ -f "$batch_file" ]]; then
       _log "[mimic] merging pool → master"
       local stats=$($ISAAC_PY "$REPO"/scripts/orchestrate/merge_mimic_pool.py \
-        --pool "$POOL" --output "$MASTER" 2>&1 | tail -1)
+        --pool "$POOL" --output "$MASTER" 2>&1 | grep -E '^\{' | tail -1)
       local total=$(echo "$stats" | $VENV_PY -c \
         "import json,sys; d=json.loads(sys.stdin.read()); print(d.get('total_demos',0))")
 

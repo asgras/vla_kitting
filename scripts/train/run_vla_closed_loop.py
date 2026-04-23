@@ -10,8 +10,11 @@ Usage:
     ./isaaclab.sh -p scripts/train/run_vla_closed_loop.py \\
         --checkpoint checkpoints/smoke/checkpoints/last/pretrained_model \\
         --num_episodes 3 \\
-        --max_steps 1800 \\
+        --max_steps 450 \\
         --save_gif reports/vla_rollout.gif
+
+--max_steps matches the env's policy rate × episode_length_s. At 15 Hz the
+default is 450 (30 s). At 60 Hz (prior config) it was 1800.
 """
 from __future__ import annotations
 
@@ -28,17 +31,26 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--checkpoint", type=str, required=True,
                     help="Path to a SmolVLA pretrained_model directory (checkpoints/last/pretrained_model).")
 parser.add_argument("--num_episodes", type=int, default=3)
-parser.add_argument("--max_steps", type=int, default=1800)
+parser.add_argument("--max_steps", type=int, default=450)
 parser.add_argument("--task", type=str,
                     default="pick up the cube and place it on the green target")
 parser.add_argument("--save_gif", type=str, default=None,
-                    help="Optional: write a side-by-side gif of the first episode here.")
+                    help="Optional: write a side-by-side gif here. "
+                         "If the path contains '{ep}', one gif is saved per "
+                         "episode with the episode index substituted; "
+                         "otherwise only the first episode's gif is saved.")
 parser.add_argument("--jsonl_out", type=str, default=None,
                     help="Optional: append per-episode structured results here.")
 parser.add_argument("--ckpt_tag", type=str, default=None,
                     help="Optional short tag stamped on every JSONL record "
                          "(e.g. 'epoch_0023').")
 parser.add_argument("--device", type=str, default="cuda")
+parser.add_argument("--cube_xy", type=str, default=None,
+                    help="Override cube (x,y) in world-frame meters after each "
+                         "env.reset() — used to rerun the policy from the same "
+                         "cube start pose as a known training demo. One or more "
+                         "comma-separated pairs joined by ';', cycled across "
+                         "episodes: e.g. '0.479,-0.057;0.506,-0.104'. z=0.025.")
 args_cli, _ = parser.parse_known_args()
 
 app_launcher = AppLauncher(headless=True, enable_cameras=True)
@@ -147,13 +159,40 @@ def main() -> int:
     env_cfg = parse_env_cfg(TASK_ID, device=str(device), num_envs=1)
     env = gym.make(TASK_ID, cfg=env_cfg)
 
+    per_episode_gif = bool(args_cli.save_gif and "{ep}" in args_cli.save_gif)
     gif_frames: list[np.ndarray] = []
     saved_gif = False
     successes = 0
 
+    cube_xy_overrides: list[tuple[float, float]] = []
+    if args_cli.cube_xy:
+        for pair in args_cli.cube_xy.split(";"):
+            xs = [float(v) for v in pair.split(",")]
+            assert len(xs) == 2, "--cube_xy expects 'x,y' pairs joined by ';'"
+            cube_xy_overrides.append((xs[0], xs[1]))
+
     for ep in range(args_cli.num_episodes):
         obs_env, _ = env.reset()
         policy.reset()
+
+        if cube_xy_overrides:
+            xy = cube_xy_overrides[ep % len(cube_xy_overrides)]
+            sim_dev = env.unwrapped.sim.device
+            origin = env.unwrapped.scene.env_origins[0]
+            pose = torch.tensor([[
+                xy[0] + origin[0].item(),
+                xy[1] + origin[1].item(),
+                0.025 + origin[2].item(),
+                1.0, 0.0, 0.0, 0.0,
+            ]], device=sim_dev)
+            cube_rb = env.unwrapped.scene["cube"]
+            cube_rb.write_root_pose_to_sim(pose)
+            cube_rb.write_root_velocity_to_sim(torch.zeros((1, 6), device=sim_dev))
+            env.unwrapped.scene.write_data_to_sim()
+            env.unwrapped.sim.forward()
+            env.unwrapped.scene.update(env.unwrapped.sim.get_physics_dt())
+            obs_env = {"policy": env.unwrapped.observation_manager.compute()["policy"]}
+
         cube0 = obs_env["policy"]["cube_pos"][0].tolist()
         _log(f"=== episode {ep} | cube at ({cube0[0]:.3f}, {cube0[1]:.3f}, {cube0[2]:.3f})")
 
@@ -179,8 +218,8 @@ def main() -> int:
 
             obs_env, reward, terminated, truncated, info = env.step(action)
 
-            # Save first-episode frames for gif.
-            if ep == 0 and args_cli.save_gif and step % 4 == 0:
+            # Collect frames for gif (first episode only unless template uses {ep}).
+            if args_cli.save_gif and (per_episode_gif or ep == 0) and step % 4 == 0:
                 wrist = obs_env["policy"]["wrist_cam"][0].detach().cpu().numpy().astype(np.uint8)
                 third = obs_env["policy"]["third_person_cam"][0].detach().cpu().numpy().astype(np.uint8)
                 from PIL import Image
@@ -213,13 +252,16 @@ def main() -> int:
                 "cube_end": [float(x) for x in cube_end],
             })
 
-        if ep == 0 and args_cli.save_gif and gif_frames and not saved_gif:
+        if args_cli.save_gif and gif_frames and (per_episode_gif or (ep == 0 and not saved_gif)):
             import imageio
-            out = pathlib.Path(args_cli.save_gif)
+            gif_path = args_cli.save_gif.format(ep=ep) if per_episode_gif else args_cli.save_gif
+            out = pathlib.Path(gif_path)
             out.parent.mkdir(parents=True, exist_ok=True)
             imageio.mimsave(str(out), gif_frames, fps=15, loop=0)
             _log(f"    wrote gif {out} ({out.stat().st_size / 1e6:.1f} MB, {len(gif_frames)} frames)")
             saved_gif = True
+            if per_episode_gif:
+                gif_frames = []
 
     _log(f"total: {successes}/{args_cli.num_episodes} success "
          f"({100.0 * successes / args_cli.num_episodes:.0f}%)")

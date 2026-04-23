@@ -135,6 +135,51 @@ def _build_ee_pose(demo: h5py.Group) -> np.ndarray:
     raise KeyError("demo has neither (eef_pos + eef_quat) nor ee_pose")
 
 
+def _aggregate_actions(actions: np.ndarray, stride: int) -> np.ndarray:
+    """Resample a (T, 7) action stream to a stride-decimated (T_new, 7) stream.
+
+    Semantics: action[t] in the 60 Hz HDF5 is the 7D command applied FROM obs[t]
+    to obs[t+1]. When we downsample observations by taking every stride-th frame,
+    the resampled action[i] must be the command that moves the robot FROM
+    obs_new[i]=obs[i*stride] TO obs_new[i+1]=obs[(i+1)*stride]. For this env
+    (Isaac-PickCube-HC10DT-Robotiq-IK-Rel) dims 0-5 are small IK-relative
+    pos/axis-angle deltas, so summing them across the stride window is the
+    correct composition to first order (equivalent to applying them serially).
+    Dim 6 is the gripper command ∈ {-1, 0, +1} — a latched intent, not a delta;
+    we take the value at the last step of the window as the committed state.
+
+    Partial trailing window (T % stride != 0) is dropped so every resampled
+    action has a full stride-length backing in the original stream.
+    """
+    T = actions.shape[0]
+    T_new = T // stride
+    if T_new == 0:
+        return actions[:0]
+    deltas = actions[: T_new * stride, :6].reshape(T_new, stride, 6).sum(axis=1)
+    gripper = actions[: T_new * stride, 6:7].reshape(T_new, stride, 1)[:, -1, :]
+    return np.concatenate([deltas, gripper], axis=-1).astype(np.float32)
+
+
+def _sanity_check_stride(
+    demo_key: str,
+    actions: np.ndarray,
+    stride: int,
+    aggregated: np.ndarray,
+    tol: float = 1e-3,
+) -> None:
+    """Cheap offline check: sum of aggregated deltas must equal sum of original
+    deltas over the retained prefix, up to float32 summation-order noise. The
+    summation tree (stride-groups vs flat sum) differs, so exact equality is
+    not expected; tolerance is set well above the float32 floor while still
+    catching any real bug (e.g. reshape stride mixup).
+    """
+    T_new = aggregated.shape[0]
+    orig = actions[: T_new * stride, :6].sum(axis=0)
+    agg = aggregated[:, :6].sum(axis=0)
+    err = float(np.max(np.abs(orig - agg)))
+    assert err < tol, f"{demo_key}: action aggregation drift {err:.2e} > {tol}"
+
+
 def convert(
     src_path: pathlib.Path,
     dst_root: pathlib.Path,
@@ -143,6 +188,7 @@ def convert(
     fps: int,
     use_videos: bool,
     max_episodes: int | None,
+    stride: int,
 ) -> int:
     # Import here so the CLI can still print help without lerobot installed.
     try:
@@ -180,16 +226,33 @@ def convert(
 
         for i, key in enumerate(demo_keys):
             demo = data[key]
-            actions = demo["actions"][...].astype(np.float32)
-            T = actions.shape[0]
+            actions_full = demo["actions"][...].astype(np.float32)
+            T_full = actions_full.shape[0]
 
-            state = demo["obs"]["joint_pos"][...].astype(np.float32)
-            ee_pose = _build_ee_pose(demo)
-            cube_pos = demo["obs"]["cube_pos"][...].astype(np.float32)
-            wrist = demo["obs"]["wrist_cam"][...]
-            third = demo["obs"]["third_person_cam"][...]
+            state_full = demo["obs"]["joint_pos"][...].astype(np.float32)
+            ee_pose_full = _build_ee_pose(demo)
+            cube_pos_full = demo["obs"]["cube_pos"][...].astype(np.float32)
+            wrist_full = demo["obs"]["wrist_cam"][...]
+            third_full = demo["obs"]["third_person_cam"][...]
 
-            assert state.shape[0] == T == ee_pose.shape[0] == wrist.shape[0] == third.shape[0]
+            assert (state_full.shape[0] == T_full == ee_pose_full.shape[0]
+                    == wrist_full.shape[0] == third_full.shape[0])
+
+            if stride > 1:
+                actions = _aggregate_actions(actions_full, stride)
+                _sanity_check_stride(key, actions_full, stride, actions)
+                T = actions.shape[0]
+                sel = np.arange(T) * stride
+                state = state_full[sel]
+                ee_pose = ee_pose_full[sel]
+                cube_pos = cube_pos_full[sel]
+                wrist = wrist_full[sel]
+                third = third_full[sel]
+            else:
+                actions = actions_full
+                T = T_full
+                state, ee_pose, cube_pos = state_full, ee_pose_full, cube_pos_full
+                wrist, third = wrist_full, third_full
 
             for t in range(T):
                 ds.add_frame({
@@ -202,7 +265,8 @@ def convert(
                     "task": task,
                 })
             ds.save_episode()
-            _log(f"  [{i + 1}/{len(demo_keys)}] saved {key} ({T} frames)")
+            _log(f"  [{i + 1}/{len(demo_keys)}] saved {key} ({T} frames"
+                 f"{f', stride={stride} from {T_full}' if stride > 1 else ''})")
 
     _log(f"done — wrote {len(demo_keys)} episodes to {dst_root}")
     return 0
@@ -217,13 +281,25 @@ def main() -> int:
                     help="HF-style repo id, e.g. vla_kitting/cube_pick_v1")
     ap.add_argument("--task", type=str,
                     default="pick up the cube and place it on the green target")
-    ap.add_argument("--fps", type=int, default=60)
+    ap.add_argument("--fps", type=int, default=60,
+                    help="FPS metadata to stamp on the LeRobot dataset. If "
+                         "--stride>1, this should be the DOWNSAMPLED fps "
+                         "(e.g. original 60 Hz / stride 4 → --fps 15).")
+    ap.add_argument("--stride", type=int, default=1,
+                    help="Downsample the HDF5 time axis by this factor. For "
+                         "each retained obs frame, the 6 IK-rel action deltas "
+                         "are summed across the stride window and the gripper "
+                         "value at the window's last step is used. Stride 4 "
+                         "converts 60 Hz → 15 Hz natively.")
     ap.add_argument("--use_videos", action="store_true", default=False,
                     help="encode cameras as mp4 (needs ffmpeg + svt-av1). "
                          "Default off — stores PNGs, simpler but bigger.")
     ap.add_argument("--max_episodes", type=int, default=None,
                     help="convert only the first N episodes (debugging).")
     args = ap.parse_args()
+
+    if args.stride < 1:
+        ap.error("--stride must be >= 1")
 
     # Allow running from /opt/IsaacSim/python.sh even if lerobot is only
     # available as a source clone.
@@ -239,6 +315,7 @@ def main() -> int:
         fps=args.fps,
         use_videos=args.use_videos,
         max_episodes=args.max_episodes,
+        stride=args.stride,
     )
 
 
