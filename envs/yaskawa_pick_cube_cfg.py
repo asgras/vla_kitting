@@ -175,9 +175,7 @@ class ActionsCfg:
             use_relative_mode=True,
             ik_method="dls",
         ),
-        # With scale=0.1, an action of 1.0 commands a 10 cm delta per control step
-        # (sim runs at 60 Hz after decimation=2 / dt=1/120). The scripted controller
-        # then effectively caps step size to 1-2 cm for stability.
+        # With scale=0.1, an action of 1.0 commands a 10 cm delta per control step.
         scale=0.1,
     )
     # Only finger_joint is driven; the 5 mimic joints follow via the USD's
@@ -302,12 +300,7 @@ class YaskawaPickCubeIkRelEnvCfg(ManagerBasedRLEnvCfg):
     commands = None
 
     def __post_init__(self):
-        # 120 Hz physics / decimation 8 → 15 Hz policy rate. Cameras capture at
-        # render_interval=decimation so one image frame == one policy step.
-        # (Was decimation=2 → 60 Hz; dropped to 15 Hz after the 60 Hz training
-        # run plateaued — the vast majority of 60 Hz frames were near-duplicates
-        # diluting the gradient signal.)
-        self.decimation = 8
+        self.decimation = 2
         self.episode_length_s = 30.0
         self.sim.dt = 1.0 / 120.0
         self.sim.render_interval = self.decimation

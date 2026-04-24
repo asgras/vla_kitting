@@ -51,6 +51,16 @@ parser.add_argument("--cube_xy", type=str, default=None,
                          "cube start pose as a known training demo. One or more "
                          "comma-separated pairs joined by ';', cycled across "
                          "episodes: e.g. '0.479,-0.057;0.506,-0.104'. z=0.025.")
+parser.add_argument("--zero_wrist_cam", action="store_true", default=False,
+                    help="Replace wrist_cam observation with zeros at every "
+                         "step (ablation: is the policy using wrist vision?).")
+parser.add_argument("--zero_third_cam", action="store_true", default=False,
+                    help="Replace third_person_cam observation with zeros "
+                         "(ablation).")
+parser.add_argument("--zero_cube_pos", action="store_true", default=False,
+                    help="Replace cube_pos observation with zeros at every "
+                         "step (ablation: is the policy using the privileged "
+                         "cube_pos channel as a shortcut?).")
 args_cli, _ = parser.parse_known_args()
 
 app_launcher = AppLauncher(headless=True, enable_cameras=True)
@@ -61,11 +71,17 @@ def _log(msg: str) -> None:
     print(f"[vla] {msg}", flush=True)
 
 
-def _obs_env_to_lerobot(env_obs: dict) -> dict:
+def _obs_env_to_lerobot(env_obs: dict,
+                        zero_wrist_cam: bool = False,
+                        zero_third_cam: bool = False,
+                        zero_cube_pos: bool = False) -> dict:
     """Remap env observation keys into the LeRobot feature names the policy
     was trained on, and convert CUDA tensors to CPU numpy. Handles both the
     Mimic env (eef_pos + eef_quat split) and the plain env (combined
     ee_pose) — the LeRobot dataset uses the 7D combined form either way.
+
+    Ablation flags force specific observation channels to zero before the
+    policy sees them.
     """
     import numpy as np
     import torch
@@ -81,12 +97,23 @@ def _obs_env_to_lerobot(env_obs: dict) -> dict:
         ee_quat = _np(p["eef_quat"]).astype(np.float32)      # (4,)
         ee_pose = np.concatenate([ee_pos, ee_quat], axis=-1)
 
+    cube_pos = _np(p["cube_pos"]).astype(np.float32)
+    wrist = _np(p["wrist_cam"]).astype(np.uint8)
+    third = _np(p["third_person_cam"]).astype(np.uint8)
+
+    if zero_cube_pos:
+        cube_pos = np.zeros_like(cube_pos)
+    if zero_wrist_cam:
+        wrist = np.zeros_like(wrist)
+    if zero_third_cam:
+        third = np.zeros_like(third)
+
     return {
         "observation.state": _np(p["joint_pos"]).astype(np.float32),
         "observation.ee_pose": ee_pose,
-        "observation.cube_pos": _np(p["cube_pos"]).astype(np.float32),
-        "observation.images.wrist": _np(p["wrist_cam"]).astype(np.uint8),
-        "observation.images.third_person": _np(p["third_person_cam"]).astype(np.uint8),
+        "observation.cube_pos": cube_pos,
+        "observation.images.wrist": wrist,
+        "observation.images.third_person": third,
     }
 
 
@@ -201,7 +228,12 @@ def main() -> int:
         for step in range(args_cli.max_steps):
             # Build an inference frame matching the dataset schema, then
             # preprocess (normalize images, tokenize task string).
-            raw = _obs_env_to_lerobot(obs_env)
+            raw = _obs_env_to_lerobot(
+                obs_env,
+                zero_wrist_cam=args_cli.zero_wrist_cam,
+                zero_third_cam=args_cli.zero_third_cam,
+                zero_cube_pos=args_cli.zero_cube_pos,
+            )
             frame = prepare_observation_for_inference(
                 observation=raw, device=device, task=args_cli.task, robot_type="yaskawa_hc10dt_robotiq_2f85"
             )
