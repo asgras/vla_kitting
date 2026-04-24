@@ -1,0 +1,56 @@
+diff --git a/src/lerobot/configs/default.py b/src/lerobot/configs/default.py
+index f613b525..94d9af47 100644
+--- a/src/lerobot/configs/default.py
++++ b/src/lerobot/configs/default.py
+@@ -95,3 +95,10 @@ class PeftConfig:
+     # the rank used for the adapter. In general a higher rank means more trainable parameters and closer to full
+     # fine-tuning.
+     r: int = 16
++
++    # LoRA-specific: scaling factor. Effective LR on LoRA deltas is ~ lora_alpha/r. Standard practice is
++    # alpha >= r (e.g. alpha=r or alpha=2*r). If None, PEFT's own default kicks in (currently 8).
++    lora_alpha: int | None = None
++
++    # LoRA-specific: dropout probability applied to LoRA layers during training. None -> PEFT default (0.0).
++    lora_dropout: float | None = None
+diff --git a/src/lerobot/policies/factory.py b/src/lerobot/policies/factory.py
+index a593e5bc..12e31c34 100644
+--- a/src/lerobot/policies/factory.py
++++ b/src/lerobot/policies/factory.py
+@@ -511,7 +511,13 @@ def make_policy(
+             )
+ 
+         policy = policy_cls.from_pretrained(**kwargs)
+-        policy = PeftModel.from_pretrained(policy, peft_pretrained_path, config=peft_config)
++        # is_trainable=True so resumed LoRA fine-tuning continues to train the
++        # loaded adapter. Default (False) freezes the adapter (inference_mode),
++        # which breaks backward() when we are resuming without wrap_with_peft
++        # (see vla_kitting/scripts/orchestrate/prepare_resume_config.py).
++        policy = PeftModel.from_pretrained(
++            policy, peft_pretrained_path, config=peft_config, is_trainable=True
++        )
+ 
+     else:
+         # Make a fresh policy.
+diff --git a/src/lerobot/policies/groot/groot_n1.py b/src/lerobot/policies/groot/groot_n1.py
+index 06ff5a04..820290ca 100644
+--- a/src/lerobot/policies/groot/groot_n1.py
++++ b/src/lerobot/policies/groot/groot_n1.py
+@@ -176,13 +176,13 @@ N_COLOR_CHANNELS = 3
+ @dataclass
+ class GR00TN15Config(PretrainedConfig):
+     model_type = "gr00t_n1_5"
+-    backbone_cfg: dict = field(init=False, metadata={"help": "Backbone configuration."})
++    backbone_cfg: dict = field(default=None, init=False, metadata={"help": "Backbone configuration."})
+ 
+-    action_head_cfg: dict = field(init=False, metadata={"help": "Action head configuration."})
++    action_head_cfg: dict = field(default=None, init=False, metadata={"help": "Action head configuration."})
+ 
+-    action_horizon: int = field(init=False, metadata={"help": "Action horizon."})
++    action_horizon: int = field(default=None, init=False, metadata={"help": "Action horizon."})
+ 
+-    action_dim: int = field(init=False, metadata={"help": "Action dimension."})
++    action_dim: int = field(default=None, init=False, metadata={"help": "Action dimension."})
+     compute_dtype: str = field(default="float32", metadata={"help": "Compute dtype."})
+ 
+     def __init__(self, **kwargs):
