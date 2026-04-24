@@ -238,23 +238,21 @@ class EventCfg:
     )
 
     # Cube default spawn at (0.55, 0, 0.025). reset_root_state_uniform samples
-    # a DELTA from this default within the ranges below. Widened from the
-    # original (±0.08, ±0.10) to give Mimic a more diverse seed distribution —
-    # still well inside arm reach and inside the camera framing.
+    # a DELTA from this default within the ranges below. Significantly widened
+    # for the vision_grounded_wide_15hz run (2026-04-24): X window doubled,
+    # Y window ~2.15× to force visual grounding across most of the table.
+    # Yaw kept at 0 per user direction — avoids the 50 mm cube diagonal
+    # clipping the 2F-85 finger knuckles and keeps the scripted controller
+    # simple. If Phase 1 open-loop scripted success on the widened box is
+    # below gate G1 (28/30), tighten these bounds before running Mimic.
     randomize_cube_pose = EventTerm(
         func=mdp.reset_root_state_uniform,
         mode="reset",
         params={
             "pose_range": {
-                "x": (-0.10, 0.10),   # sampled cube X ∈ [0.45, 0.65]
-                "y": (-0.13, 0.13),   # sampled cube Y ∈ [-0.13, 0.13]
+                "x": (-0.15, 0.15),   # sampled cube X ∈ [0.40, 0.70]
+                "y": (-0.22, 0.22),   # sampled cube Y ∈ [-0.22, 0.22]
                 "z": (0.0, 0.0),
-                # Yaw randomization still disabled. With ±0.5 rad yaw, the
-                # 50 mm cube's 70.7 mm diagonal clips the 2F-85 finger knuckles
-                # during descent and bumps the cube sideways. Our scripted
-                # controller reads cube_pos but not cube_rot, so it can't
-                # align the gripper yaw. Re-enable once we teach the scripted
-                # grasp to read cube_rot (or move to teleop).
                 "yaw": (0.0, 0.0),
             },
             "velocity_range": {},
@@ -300,7 +298,12 @@ class YaskawaPickCubeIkRelEnvCfg(ManagerBasedRLEnvCfg):
     commands = None
 
     def __post_init__(self):
-        self.decimation = 2
+        # 120 Hz physics / decimation 4 → 30 Hz policy rate. 30 Hz matches
+        # SmolVLA's pretrain distribution (SO-100 at 30 Hz) — neither the
+        # prior 60 Hz (decimation=2) nor the shelved 15 Hz (decimation=8)
+        # attempts match pretrain action statistics. v3 restart per
+        # reports/runs/vision_grounded_wide_15hz_2026-04-24/run_diary.md.
+        self.decimation = 4
         self.episode_length_s = 30.0
         self.sim.dt = 1.0 / 120.0
         self.sim.render_interval = self.decimation

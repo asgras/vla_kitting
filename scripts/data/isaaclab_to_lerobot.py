@@ -50,7 +50,7 @@ def _log(msg: str) -> None:
     print(f"[isaaclab2lerobot] {msg}", flush=True)
 
 
-def _build_features(state_dim: int, use_videos: bool) -> dict:
+def _build_features(state_dim: int, use_videos: bool, drop_cube_pos: bool = False) -> dict:
     """LeRobot feature schema for the HC10DT cube pick-place task."""
     # Joint-name labels for the 12D state vector. The URDF exposes the arm
     # (joint_1_s..joint_6_t) plus the 6 Robotiq gripper joints.
@@ -76,7 +76,7 @@ def _build_features(state_dim: int, use_videos: bool) -> dict:
     # Note: no separate observation.gripper feature — LeRobot treats shape=(1,)
     # features as scalar Value() which then breaks type validation in add_frame.
     # The gripper finger_joint angle is already included in observation.state.
-    return {
+    features = {
         "observation.state": {
             "dtype": "float32",
             "shape": (state_dim,),
@@ -86,11 +86,6 @@ def _build_features(state_dim: int, use_videos: bool) -> dict:
             "dtype": "float32",
             "shape": (7,),
             "names": ["x", "y", "z", "qw", "qx", "qy", "qz"],
-        },
-        "observation.cube_pos": {
-            "dtype": "float32",
-            "shape": (3,),
-            "names": ["x", "y", "z"],
         },
         "observation.images.wrist": {
             "dtype": cam_dtype,
@@ -108,6 +103,13 @@ def _build_features(state_dim: int, use_videos: bool) -> dict:
             "names": action_names,
         },
     }
+    if not drop_cube_pos:
+        features["observation.cube_pos"] = {
+            "dtype": "float32",
+            "shape": (3,),
+            "names": ["x", "y", "z"],
+        }
+    return features
 
 
 def _read_obs(demo: h5py.Group, key: str, fallback: str | None = None) -> np.ndarray | None:
@@ -189,6 +191,7 @@ def convert(
     use_videos: bool,
     max_episodes: int | None,
     stride: int,
+    drop_cube_pos: bool = False,
 ) -> int:
     # Import here so the CLI can still print help without lerobot installed.
     try:
@@ -214,7 +217,7 @@ def convert(
         state_dim = int(sample["obs"]["joint_pos"].shape[1])
         _log(f"state dim = {state_dim}")
 
-        features = _build_features(state_dim, use_videos)
+        features = _build_features(state_dim, use_videos, drop_cube_pos=drop_cube_pos)
         ds = LeRobotDataset.create(
             repo_id=repo_id,
             fps=fps,
@@ -255,15 +258,17 @@ def convert(
                 wrist, third = wrist_full, third_full
 
             for t in range(T):
-                ds.add_frame({
+                frame = {
                     "observation.state": state[t],
                     "observation.ee_pose": ee_pose[t],
-                    "observation.cube_pos": cube_pos[t],
                     "observation.images.wrist": wrist[t],
                     "observation.images.third_person": third[t],
                     "action": actions[t],
                     "task": task,
-                })
+                }
+                if not drop_cube_pos:
+                    frame["observation.cube_pos"] = cube_pos[t]
+                ds.add_frame(frame)
             ds.save_episode()
             _log(f"  [{i + 1}/{len(demo_keys)}] saved {key} ({T} frames"
                  f"{f', stride={stride} from {T_full}' if stride > 1 else ''})")
@@ -280,7 +285,11 @@ def main() -> int:
     ap.add_argument("--repo_id", type=str, required=True,
                     help="HF-style repo id, e.g. vla_kitting/cube_pick_v1")
     ap.add_argument("--task", type=str,
-                    default="pick up the cube and place it on the green target")
+                    default="pick up the cube and place it on the pink square")
+    ap.add_argument("--drop_cube_pos", action="store_true", default=False,
+                    help="Omit observation.cube_pos from the LeRobot feature "
+                         "schema so the policy cannot regress from privileged "
+                         "cube position and must learn visual grounding.")
     ap.add_argument("--fps", type=int, default=60,
                     help="FPS metadata to stamp on the LeRobot dataset. If "
                          "--stride>1, this should be the DOWNSAMPLED fps "
@@ -316,6 +325,7 @@ def main() -> int:
         use_videos=args.use_videos,
         max_episodes=args.max_episodes,
         stride=args.stride,
+        drop_cube_pos=args.drop_cube_pos,
     )
 
 

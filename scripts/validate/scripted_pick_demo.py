@@ -27,7 +27,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--num_demos", type=int, default=5)
 parser.add_argument("--dataset_file", type=str,
                     default=str(REPO / "datasets/teleop/cube_scripted.hdf5"))
-parser.add_argument("--max_steps_per_demo", type=int, default=1600)
+parser.add_argument("--max_steps_per_demo", type=int, default=1000)
 parser.add_argument("--gui", action="store_true", default=False,
                     help="Run with Isaac Sim viewport visible (DCV display). Default is headless.")
 args_cli, _ = parser.parse_known_args()
@@ -141,20 +141,26 @@ def script_trajectory_waypoints(cube_pos_w: "torch.Tensor") -> list[dict]:
     pose during that phase (needed for approach/descent alignment, MUST be
     False once the gripper has contacted the cube).
 
-    Phases (total ~1660 @ 60 Hz ≈ 28 s per demo):
-      A  approach+reorient   140  TRACK   above cube, rotate to top-down
-      B  hover settle         30  TRACK   kill residual drift
-      C  slow descent        200  TRACK   straight down to grasp
-      D  settle at grasp      40  --      let cube rest under open pads
-      E  close gripper       180  --      pinch, EE frozen
-      F  lift straight up    180  --      pure +Z to LIFT_Z
-      G1 transport leg 1     200  --      first 1/3 of Cartesian path
-      G2 transport leg 2     200  --      second 1/3
-      G3 transport leg 3     200  --      last 1/3, arriving over PLACE_XY
-      H  hover above place    60  --      settle at LIFT_Z over output
-      I  descend to place    150  --      pads lower toward table
-      J  release              80  --      open gripper, cube drops
-      K  retreat up           80  --      lift EE clear, let cube settle
+    Phases (total ~456 @ 15 Hz ≈ 30 s per demo):
+      A  approach+reorient    35  TRACK   above cube, rotate to top-down
+      B  hover settle          8  TRACK   kill residual drift
+      C  slow descent         50  TRACK   straight down to grasp
+      D  settle at grasp      15  --      let cube rest under open pads (lengthened from 10)
+      E  close gripper        60  --      pinch, EE frozen (lengthened from 45)
+      F  lift straight up     45  --      pure +Z to LIFT_Z
+      G1 transport leg 1      50  --      first 1/3 of Cartesian path
+      G2 transport leg 2      50  --      second 1/3
+      G3 transport leg 3      50  --      last 1/3, arriving over PLACE_XY
+      H  hover above place    15  --      settle at LIFT_Z over output
+      I  descend to place     38  --      pads lower toward table
+      J  release              20  --      open gripper, cube drops
+      K  retreat up           20  --      lift EE clear, let cube settle
+
+    Step counts derived from the former 60 Hz counts divided by 4 to match
+    the 15 Hz policy rate (env decimation=8). D and E are additionally
+    lengthened beyond the /4 baseline to give the policy a longer grasp-
+    commit window (Hole C — the close transition being statistically
+    invisible in loss). See reports/recovery_plan_2026-04-24.md.
     """
     import torch
     cx, cy, _ = cube_pos_w.tolist()
@@ -167,41 +173,39 @@ def script_trajectory_waypoints(cube_pos_w: "torch.Tensor") -> list[dict]:
     # gripper = +1.0 is OPEN, -1.0 is CLOSE.
     return [
         # A: rise/rotate to top-down above cube.
-        {"ee_pos": torch.tensor([cx, gy, PICK_APPROACH_Z]), "gripper": +1.0, "steps": 140, "track": True},
+        {"ee_pos": torch.tensor([cx, gy, PICK_APPROACH_Z]), "gripper": +1.0, "steps": 35, "track": True},
         # B: hover-settle above cube (bias-compensated).
-        {"ee_pos": torch.tensor([cx, gy, PICK_APPROACH_Z]), "gripper": +1.0, "steps": 30,  "track": True},
+        {"ee_pos": torch.tensor([cx, gy, PICK_APPROACH_Z]), "gripper": +1.0, "steps": 8,  "track": True},
         # C: slow pure-vertical descent to bias-compensated grasp.
-        {"ee_pos": torch.tensor([cx, gy, PICK_GRASP_Z]),    "gripper": +1.0, "steps": 200, "track": True},
+        {"ee_pos": torch.tensor([cx, gy, PICK_GRASP_Z]),    "gripper": +1.0, "steps": 50, "track": True},
         # D: settle with pads straddling the cube. Tracking OFF — freezes
         #    the EE so the cube can rest, and we commit to grasp xy now.
-        {"ee_pos": torch.tensor([cx, gy, PICK_GRASP_Z]),    "gripper": +1.0, "steps": 40,  "track": False},
+        {"ee_pos": torch.tensor([cx, gy, PICK_GRASP_Z]),    "gripper": +1.0, "steps": 15, "track": False},
         # E: close gripper in place. Tracking OFF — if the close nudges the
         #    cube, we do NOT chase it (chasing was the old feedback loop).
-        {"ee_pos": torch.tensor([cx, gy, PICK_GRASP_Z]),    "gripper": -1.0, "steps": 180, "track": False},
+        {"ee_pos": torch.tensor([cx, gy, PICK_GRASP_Z]),    "gripper": -1.0, "steps": 60, "track": False},
         # F: lift straight up to LIFT_Z. Tracking OFF.
-        {"ee_pos": torch.tensor([cx, gy, LIFT_Z]),          "gripper": -1.0, "steps": 180, "track": False},
+        {"ee_pos": torch.tensor([cx, gy, LIFT_Z]),          "gripper": -1.0, "steps": 45, "track": False},
         # G1-G3: transport split into three short segments. A single Cartesian
         #    line from (pick, 0.40) to (place, 0.40) pushes the HC10DT through
         #    an IK singularity mid-swing — observed EE jumping 45 cm backward
-        #    in one decile even at LIFT_Z=0.40. Broken into 3 × 200-step legs
-        #    the diff-IK controller stays in the same joint branch the whole
-        #    way. Intermediate points bias the Y motion first, then X, then
-        #    final approach — keeping the base-joint rotation monotonic.
+        #    in one decile even at LIFT_Z=0.40. Broken into 3 short legs the
+        #    diff-IK controller stays in the same joint branch the whole way.
         {"ee_pos": torch.tensor([cx + (tx - cx) * 0.33, cy + (ty - cy) * 0.33 + GRIP_BIAS_Y, LIFT_Z]),
-         "gripper": -1.0, "steps": 200, "track": False},
+         "gripper": -1.0, "steps": 50, "track": False},
         {"ee_pos": torch.tensor([cx + (tx - cx) * 0.66, cy + (ty - cy) * 0.66 + GRIP_BIAS_Y, LIFT_Z]),
-         "gripper": -1.0, "steps": 200, "track": False},
-        {"ee_pos": torch.tensor([tx, ty, LIFT_Z]),          "gripper": -1.0, "steps": 200, "track": False},
+         "gripper": -1.0, "steps": 50, "track": False},
+        {"ee_pos": torch.tensor([tx, ty, LIFT_Z]),          "gripper": -1.0, "steps": 50, "track": False},
         # H: settle above the output location before descending.
-        {"ee_pos": torch.tensor([tx, ty, LIFT_Z]),          "gripper": -1.0, "steps": 60,  "track": False},
+        {"ee_pos": torch.tensor([tx, ty, LIFT_Z]),          "gripper": -1.0, "steps": 15, "track": False},
         # I: descend toward the placement height (pad ends ~4 cm over table).
-        {"ee_pos": torch.tensor([tx, ty, PLACE_Z]),         "gripper": -1.0, "steps": 150, "track": False},
+        {"ee_pos": torch.tensor([tx, ty, PLACE_Z]),         "gripper": -1.0, "steps": 38, "track": False},
         # J: RELEASE — open the fingers, cube drops the last 1-2 cm and settles.
-        {"ee_pos": torch.tensor([tx, ty, PLACE_Z]),         "gripper": +1.0, "steps": 80,  "track": False},
+        {"ee_pos": torch.tensor([tx, ty, PLACE_Z]),         "gripper": +1.0, "steps": 20, "track": False},
         # K: retreat back up, giving the cube clearance to settle fully. The
         #    success term (cube_placed_at_target) fires once cube is near-stationary
         #    at z<0.05 within xy_tolerance of the target.
-        {"ee_pos": torch.tensor([tx, ty, LIFT_Z]),          "gripper": +1.0, "steps": 80,  "track": False},
+        {"ee_pos": torch.tensor([tx, ty, LIFT_Z]),          "gripper": +1.0, "steps": 20, "track": False},
     ]
 
 

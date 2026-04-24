@@ -33,7 +33,7 @@ parser.add_argument("--checkpoint", type=str, required=True,
 parser.add_argument("--num_episodes", type=int, default=3)
 parser.add_argument("--max_steps", type=int, default=450)
 parser.add_argument("--task", type=str,
-                    default="pick up the cube and place it on the green target")
+                    default="pick up the cube and place it on the pink square")
 parser.add_argument("--save_gif", type=str, default=None,
                     help="Optional: write a side-by-side gif here. "
                          "If the path contains '{ep}', one gif is saved per "
@@ -61,6 +61,18 @@ parser.add_argument("--zero_cube_pos", action="store_true", default=False,
                     help="Replace cube_pos observation with zeros at every "
                          "step (ablation: is the policy using the privileged "
                          "cube_pos channel as a shortcut?).")
+parser.add_argument("--drop_cube_pos", action="store_true", default=False,
+                    help="Omit observation.cube_pos entirely from the frame "
+                         "passed to the policy. Use when the policy was "
+                         "trained on a dataset that does NOT include cube_pos "
+                         "as an input feature. Different from --zero_cube_pos, "
+                         "which keeps the feature but zeros its values.")
+parser.add_argument("--gripper_threshold", type=float, default=None,
+                    help="If set, apply sign-threshold to action[6] at "
+                         "inference: action[6] = +1 if > threshold else -1. "
+                         "Matches the env's BinaryJointPositionActionCfg "
+                         "semantics (close on <0, open otherwise). Typical "
+                         "value 0.0. Leave unset to pass policy output raw.")
 args_cli, _ = parser.parse_known_args()
 
 app_launcher = AppLauncher(headless=True, enable_cameras=True)
@@ -74,7 +86,8 @@ def _log(msg: str) -> None:
 def _obs_env_to_lerobot(env_obs: dict,
                         zero_wrist_cam: bool = False,
                         zero_third_cam: bool = False,
-                        zero_cube_pos: bool = False) -> dict:
+                        zero_cube_pos: bool = False,
+                        drop_cube_pos: bool = False) -> dict:
     """Remap env observation keys into the LeRobot feature names the policy
     was trained on, and convert CUDA tensors to CPU numpy. Handles both the
     Mimic env (eef_pos + eef_quat split) and the plain env (combined
@@ -108,13 +121,15 @@ def _obs_env_to_lerobot(env_obs: dict,
     if zero_third_cam:
         third = np.zeros_like(third)
 
-    return {
+    out = {
         "observation.state": _np(p["joint_pos"]).astype(np.float32),
         "observation.ee_pose": ee_pose,
-        "observation.cube_pos": cube_pos,
         "observation.images.wrist": wrist,
         "observation.images.third_person": third,
     }
+    if not drop_cube_pos:
+        out["observation.cube_pos"] = cube_pos
+    return out
 
 
 def _append_jsonl(path: pathlib.Path, record: dict) -> None:
@@ -233,6 +248,7 @@ def main() -> int:
                 zero_wrist_cam=args_cli.zero_wrist_cam,
                 zero_third_cam=args_cli.zero_third_cam,
                 zero_cube_pos=args_cli.zero_cube_pos,
+                drop_cube_pos=args_cli.drop_cube_pos,
             )
             frame = prepare_observation_for_inference(
                 observation=raw, device=device, task=args_cli.task, robot_type="yaskawa_hc10dt_robotiq_2f85"
@@ -247,6 +263,17 @@ def main() -> int:
             if not torch.is_tensor(action):
                 action = torch.as_tensor(action)
             action = action.view(1, -1).to(env_cfg.sim.device)
+
+            # Gripper sign-threshold: optionally snap action[6] to ±1 so the
+            # policy's continuous output matches the env's binary wrapper
+            # (BinaryJointPositionActionCfg thresholds at 0 internally, so
+            # this is a crispness/logging aid more than a behavior change).
+            if args_cli.gripper_threshold is not None:
+                action[:, 6] = torch.where(
+                    action[:, 6] > args_cli.gripper_threshold,
+                    torch.ones_like(action[:, 6]),
+                    -torch.ones_like(action[:, 6]),
+                )
 
             obs_env, reward, terminated, truncated, info = env.step(action)
 

@@ -237,7 +237,8 @@ phase_convert() {
     "$REPO"/scripts/data/isaaclab_to_lerobot.py \
     --input "$MASTER" --output "$dst" \
     --repo_id vla_kitting/cube_pick_v1 \
-    --task "pick up the cube and place it on the green target" \
+    --task "pick up the cube and place it on the pink square" \
+    --fps 15 --stride 1 --drop_cube_pos \
     2>&1 | tee -a "$MIMIC_LOG" | tail -10
 
   # Atomic-ish symlink replace. `mv -Tf` can replace a symlink-to-symlink but

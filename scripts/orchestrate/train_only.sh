@@ -47,13 +47,16 @@ TRAIN_LR=${TRAIN_LR:-1e-4}
 EVAL_EPISODES=${EVAL_EPISODES:-10}
 EVAL_EVERY_N=${EVAL_EVERY_N:-10}
 USE_LORA=${USE_LORA:-1}
-LORA_R=${LORA_R:-32}
-LORA_ALPHA=${LORA_ALPHA:-32}
+LORA_R=${LORA_R:-64}
+LORA_ALPHA=${LORA_ALPHA:-64}
 LORA_DROPOUT=${LORA_DROPOUT:-0.05}
-# Broader target than the SmolVLA default (q,v only): adapt all attention
-# projections plus the FFN in the action expert, keeping the VLM backbone
-# frozen. Still excludes the vision tower and the LM head.
-LORA_TARGETS_REGEX=${LORA_TARGETS_REGEX:-"(model\.vlm_with_expert\.lm_expert\..*\.(q|k|v|o|gate|up|down)_proj|model\.(state_proj|action_in_proj|action_out_proj|action_time_mlp_in|action_time_mlp_out))"}
+# v2 (vision_grounded_wide_15hz, 2026-04-24): expanded from the prior targets
+# to also include the vision tower's attention projections. The prior ablation
+# showed the policy was ignoring vision; adding LoRA surface to the visual
+# attention lets the encoder specialize task-relevant features (cube, pads,
+# pink square) instead of using frozen internet-pretrained ViT features.
+# LM head remains frozen — single-task fine-tune has nothing to learn there.
+LORA_TARGETS_REGEX=${LORA_TARGETS_REGEX:-"(model\.vlm_with_expert\.(lm_expert\..*\.(q|k|v|o|gate|up|down)_proj|vlm\.model\.vision_model\.encoder\.layers\..*\.self_attn\.(q|k|v|out)_proj)|model\.(state_proj|action_in_proj|action_out_proj|action_time_mlp_in|action_time_mlp_out))"}
 N_ACTION_STEPS=${N_ACTION_STEPS:-12}
 
 # Budget watchdog. Set BUDGET_HOURS=0 to disable.
@@ -214,6 +217,12 @@ while true; do
       # before the policy re-queries. At 15 Hz we want ~0.8 s lookahead so
       # the default 50 (= 3.3 s) is too coarse.
       --policy.n_action_steps="$N_ACTION_STEPS"
+      # Per-dim action-loss weights: gripper (dim 6) weighted 8× to compensate
+      # for its sparse signal (1-2 transition frames per demo) being drowned
+      # by the 6D pose-delta dims under uniform MSE. Local lerobot patch in
+      # smolvla/modeling_smolvla.py + configuration_smolvla.py implements the
+      # broadcasted weight. See reports/recovery_plan_2026-04-24.md Hole B.
+      --policy.action_loss_dim_weights='[1.0,1.0,1.0,1.0,1.0,1.0,8.0]'
     )
     if [[ "$USE_LORA" == "1" ]]; then
       train_args+=(
@@ -222,8 +231,14 @@ while true; do
         --peft.lora_alpha="$LORA_ALPHA"
         --peft.lora_dropout="$LORA_DROPOUT"
         --peft.target_modules="$LORA_TARGETS_REGEX"
+        # modules_to_save (via lerobot's full_training_modules alias):
+        # promote the final action-head projection and time MLP from LoRA-
+        # delta to fully-trained, since their outputs are closest to the 7D
+        # action and most capacity-sensitive. See plan §4.
+        --peft.full_training_modules='[action_out_proj,action_time_mlp_out]'
       )
       _log "fresh start from lerobot/smolvla_base + LoRA r=$LORA_R alpha=$LORA_ALPHA dropout=$LORA_DROPOUT, constant LR=$TRAIN_LR"
+      _log "  action_loss_dim_weights=[1,1,1,1,1,1,8]  full_training_modules=[action_out_proj,action_time_mlp_out]"
     else
       _log "fresh start from lerobot/smolvla_base (full fine-tune), constant LR=$TRAIN_LR"
     fi
@@ -258,11 +273,12 @@ while true; do
     eval_log="$LOG_DIR/eval_epoch_$(printf '%04d' "$epoch").out"
     set +e
     # max_steps 450 = 30 s at 15 Hz policy rate (match the env's
-    # episode_length_s=30). Was 1800 when the policy ran at 60 Hz.
+    # episode_length_s=30).
     PYTHONPATH="$LEROBOT_SRC:${PYTHONPATH:-}" "$ISAAC_LAB"/isaaclab.sh \
       -p "$REPO"/scripts/train/run_vla_closed_loop.py \
       --checkpoint "$last_ckpt" \
       --num_episodes "$EVAL_EPISODES" --max_steps 450 \
+      --drop_cube_pos --gripper_threshold 0.0 \
       --save_gif "$eval_gif" \
       --jsonl_out "$LOG_DIR/eval_episodes.jsonl" \
       --ckpt_tag "epoch_$(printf '%04d' "$epoch")" \
