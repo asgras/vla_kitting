@@ -50,14 +50,16 @@ USE_LORA=${USE_LORA:-1}
 LORA_R=${LORA_R:-64}
 LORA_ALPHA=${LORA_ALPHA:-64}
 LORA_DROPOUT=${LORA_DROPOUT:-0.05}
-# v2 (vision_grounded_wide_15hz, 2026-04-24): expanded from the prior targets
-# to also include the vision tower's attention projections. The prior ablation
-# showed the policy was ignoring vision; adding LoRA surface to the visual
-# attention lets the encoder specialize task-relevant features (cube, pads,
-# pink square) instead of using frozen internet-pretrained ViT features.
-# LM head remains frozen — single-task fine-tune has nothing to learn there.
-LORA_TARGETS_REGEX=${LORA_TARGETS_REGEX:-"(model\.vlm_with_expert\.(lm_expert\..*\.(q|k|v|o|gate|up|down)_proj|vlm\.model\.vision_model\.encoder\.layers\..*\.self_attn\.(q|k|v|out)_proj)|model\.(state_proj|action_in_proj|action_out_proj|action_time_mlp_in|action_time_mlp_out))"}
-N_ACTION_STEPS=${N_ACTION_STEPS:-12}
+# v3 (2026-04-24): vision tower REMOVED from LoRA targets per SmolVLA paper
+# canonical setup (VLM frozen, only action expert fine-tuned). Community
+# evidence (Accessible Physical AI) shows unfreezing vision gains ~2 % at
+# 200 demos and costs 4× params; net negative at our scale. LM head stays
+# frozen — single-task fine-tune has nothing to learn there.
+LORA_TARGETS_REGEX=${LORA_TARGETS_REGEX:-"(model\.vlm_with_expert\.lm_expert\..*\.(q|k|v|o|gate|up|down)_proj|model\.(state_proj|action_in_proj|action_out_proj|action_time_mlp_in|action_time_mlp_out))"}
+# n_action_steps = 50 matches SmolVLA pretrain default (chunk_size). Prior
+# runs at 12-50 range; pretrain is 50. Eval time uses n_action_steps=10 per
+# lerobot maintainer recommendation (set in the eval call below).
+N_ACTION_STEPS=${N_ACTION_STEPS:-50}
 
 # Budget watchdog. Set BUDGET_HOURS=0 to disable.
 BUDGET_HOURS=${BUDGET_HOURS:-0}
@@ -207,22 +209,24 @@ while true; do
     train_args+=(
       --policy.type=smolvla
       --policy.pretrained_path=lerobot/smolvla_base
+      # CRITICAL: load_vlm_weights=true is required to actually load the
+      # pretrained SmolVLM2-500M backbone. Without this, the VLM is randomly
+      # initialized and you train from scratch — the warning from
+      # _validate_peft_config: "Training SmolVLA from scratch using PEFT.
+      # This is unlikely to yield good results." Default in
+      # configuration_smolvla.py is False (designed for from-scratch training
+      # of the action expert with VLM frozen-pretrained); we want True.
+      --policy.load_vlm_weights=true
       # Constant LR — previous default (warmup 1000 → decay to 2.5e-6 by
       # step 30000) was zeroing the LR before we had any useful training.
       --policy.optimizer_lr="$TRAIN_LR"
       --policy.scheduler_warmup_steps=0
       --policy.scheduler_decay_steps=1000000
       --policy.scheduler_decay_lr="$TRAIN_LR"
-      # n_action_steps controls how many predicted actions are executed
-      # before the policy re-queries. At 15 Hz we want ~0.8 s lookahead so
-      # the default 50 (= 3.3 s) is too coarse.
+      # n_action_steps at train time = pretrain chunk default (50). Eval
+      # call below uses n_action_steps=10 per lerobot maintainer guidance
+      # (see reports/runs/vision_grounded_wide_15hz_2026-04-24/run_diary.md).
       --policy.n_action_steps="$N_ACTION_STEPS"
-      # Per-dim action-loss weights: gripper (dim 6) weighted 8× to compensate
-      # for its sparse signal (1-2 transition frames per demo) being drowned
-      # by the 6D pose-delta dims under uniform MSE. Local lerobot patch in
-      # smolvla/modeling_smolvla.py + configuration_smolvla.py implements the
-      # broadcasted weight. See reports/recovery_plan_2026-04-24.md Hole B.
-      --policy.action_loss_dim_weights='[1.0,1.0,1.0,1.0,1.0,1.0,8.0]'
     )
     if [[ "$USE_LORA" == "1" ]]; then
       train_args+=(
@@ -232,13 +236,16 @@ while true; do
         --peft.lora_dropout="$LORA_DROPOUT"
         --peft.target_modules="$LORA_TARGETS_REGEX"
         # modules_to_save (via lerobot's full_training_modules alias):
-        # promote the final action-head projection and time MLP from LoRA-
-        # delta to fully-trained, since their outputs are closest to the 7D
-        # action and most capacity-sensitive. See plan §4.
-        --peft.full_training_modules='[action_out_proj,action_time_mlp_out]'
+        # promote only the final action-head output projection (action_out_proj)
+        # from LoRA-delta to fully-trained — it's the one module directly
+        # emitting the 7D action. action_time_mlp_out is LoRA'd per the
+        # broader community consensus that over-promoting modules_to_save
+        # shrinks the LoRA regularization benefit.
+        --peft.full_training_modules='[action_out_proj]'
       )
       _log "fresh start from lerobot/smolvla_base + LoRA r=$LORA_R alpha=$LORA_ALPHA dropout=$LORA_DROPOUT, constant LR=$TRAIN_LR"
-      _log "  action_loss_dim_weights=[1,1,1,1,1,1,8]  full_training_modules=[action_out_proj,action_time_mlp_out]"
+      _log "  vision tower frozen (removed from LoRA targets) ; modules_to_save=[action_out_proj] only"
+      _log "  action_loss_dim_weights disabled (canonical uniform MSE)"
     else
       _log "fresh start from lerobot/smolvla_base (full fine-tune), constant LR=$TRAIN_LR"
     fi
@@ -272,12 +279,13 @@ while true; do
     eval_gif="$CKPT_DIR/eval_epoch_$(printf '%04d' "$epoch").gif"
     eval_log="$LOG_DIR/eval_epoch_$(printf '%04d' "$epoch").out"
     set +e
-    # max_steps 450 = 30 s at 15 Hz policy rate (match the env's
-    # episode_length_s=30).
+    # max_steps 900 = 30 s at 30 Hz policy rate (match the env's
+    # episode_length_s=30). n_action_steps=10 at eval per lerobot
+    # maintainer recommendation (train uses chunk_size=50).
     PYTHONPATH="$LEROBOT_SRC:${PYTHONPATH:-}" "$ISAAC_LAB"/isaaclab.sh \
       -p "$REPO"/scripts/train/run_vla_closed_loop.py \
       --checkpoint "$last_ckpt" \
-      --num_episodes "$EVAL_EPISODES" --max_steps 450 \
+      --num_episodes "$EVAL_EPISODES" --max_steps 900 \
       --drop_cube_pos --gripper_threshold 0.0 \
       --save_gif "$eval_gif" \
       --jsonl_out "$LOG_DIR/eval_episodes.jsonl" \

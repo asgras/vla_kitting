@@ -32,6 +32,22 @@ Existing exemplars to match in tone and density: `reports/overnight_run_2026-04-
 
 Maintain an up-to-date pointer file at `reports/README.md` (create if missing). When you add a new dated report, add one line: `- <date> — <slug>: <one-line takeaway>`. If an older report's conclusion has since been invalidated, annotate the index entry with "(superseded by <later report>)" rather than deleting.
 
+## Authority to fix critical bugs autonomously
+
+When you find a critical, clearly-diagnosable bug mid-run that has an obvious resolution, **fix it and continue without waiting for sign-off**. Examples that qualify:
+
+- A misconfigured flag that silently invalidates the run (e.g. `load_vlm_weights=False` causing VLM to be random-init when we wanted to fine-tune the pretrained backbone — the fix is to add `--policy.load_vlm_weights=true` and relaunch).
+- A typo / wrong-default value in code we wrote, where the correct value is unambiguous from context.
+- A pipeline-blocking error with a single sensible recovery path (e.g. a stats.json missing → run the lerobot stats-compute step → continue).
+
+The bar is: "would a competent collaborator who understood the goal need to ask?" If no, just fix it. Always document the bug, the fix, and why the resolution was unambiguous in the run diary so the audit trail survives.
+
+What still needs sign-off:
+- Architectural changes (action space, control rate, policy class).
+- Plan changes that re-direct the run's hypothesis.
+- Anything destructive on user data outside the current run's scope.
+- When the diagnosis has more than one plausible resolution and the choice matters (then propose options).
+
 ## The things you must not do
 
 - Do not silently re-run a training config that has already been tried. Check `reports/` first. If it has been tried, the new run needs a specific changed variable and a written hypothesis.

@@ -207,7 +207,30 @@ def convert(
 
     with h5py.File(src_path, "r") as f:
         data = f["data"]
-        demo_keys = sorted(data.keys(), key=lambda x: int(x.split("_")[1]))
+        # Filter out placeholder entries (the scripted recorder writes a
+        # post-reset stub for each attempt; only entries with both obs and
+        # actions groups are real trajectories) AND degenerate short demos
+        # (e.g. cube spawned on target → 1-frame "auto-success"). SmolVLA's
+        # chunk_size is 50 so episodes shorter than that cannot meaningfully
+        # be trained against.
+        all_keys = sorted(data.keys(), key=lambda x: int(x.split("_")[1]))
+        MIN_FRAMES = 50
+        demo_keys = []
+        skipped_placeholder = 0
+        skipped_short = 0
+        for k in all_keys:
+            if "obs" not in data[k] or "actions" not in data[k]:
+                skipped_placeholder += 1
+                continue
+            T = data[k]["actions"].shape[0]
+            if T < MIN_FRAMES:
+                skipped_short += 1
+                continue
+            demo_keys.append(k)
+        if skipped_placeholder:
+            _log(f"skipped {skipped_placeholder} placeholder entries (no obs/actions)")
+        if skipped_short:
+            _log(f"skipped {skipped_short} degenerate short demos (<{MIN_FRAMES} frames)")
         if max_episodes is not None:
             demo_keys = demo_keys[:max_episodes]
         _log(f"converting {len(demo_keys)} episodes from {src_path}")

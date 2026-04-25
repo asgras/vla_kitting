@@ -31,7 +31,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--checkpoint", type=str, required=True,
                     help="Path to a SmolVLA pretrained_model directory (checkpoints/last/pretrained_model).")
 parser.add_argument("--num_episodes", type=int, default=3)
-parser.add_argument("--max_steps", type=int, default=450)
+parser.add_argument("--max_steps", type=int, default=900)
 parser.add_argument("--task", type=str,
                     default="pick up the cube and place it on the pink square")
 parser.add_argument("--save_gif", type=str, default=None,
