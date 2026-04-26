@@ -50,16 +50,29 @@ USE_LORA=${USE_LORA:-1}
 LORA_R=${LORA_R:-64}
 LORA_ALPHA=${LORA_ALPHA:-64}
 LORA_DROPOUT=${LORA_DROPOUT:-0.05}
-# v3 (2026-04-24): vision tower REMOVED from LoRA targets per SmolVLA paper
-# canonical setup (VLM frozen, only action expert fine-tuned). Community
-# evidence (Accessible Physical AI) shows unfreezing vision gains ~2 % at
-# 200 demos and costs 4× params; net negative at our scale. LM head stays
-# frozen — single-task fine-tune has nothing to learn there.
-LORA_TARGETS_REGEX=${LORA_TARGETS_REGEX:-"(model\.vlm_with_expert\.lm_expert\..*\.(q|k|v|o|gate|up|down)_proj|model\.(state_proj|action_in_proj|action_out_proj|action_time_mlp_in|action_time_mlp_out))"}
-# n_action_steps = 50 matches SmolVLA pretrain default (chunk_size). Prior
-# runs at 12-50 range; pretrain is 50. Eval time uses n_action_steps=10 per
-# lerobot maintainer recommendation (set in the eval call below).
-N_ACTION_STEPS=${N_ACTION_STEPS:-50}
+# v3.1 (2026-04-25): vision tower LoRA RE-ENABLED. v3 froze the vision tower
+# entirely per SmolVLA paper canonical (real-robot finding from "Accessible
+# Physical AI"). At epoch 30 the policy showed mode collapse — cube was
+# pushed but never lifted, eval cubes received the same approach trajectory
+# regardless of cube location. Diagnosis: frozen internet-pretrained ViT
+# features lacked spatial discrimination for our synthetic Isaac Sim scene
+# (small cube on brown table, fixed third-person camera). Re-adding LoRA on
+# vision attention projections gives the encoder a small task-specific
+# surface to specialize cube-position features. Module path verified by
+# instantiating SmolVLM2 — uses `self_attn` (not self_attention) and
+# `out_proj` (not o_proj).
+LORA_TARGETS_REGEX=${LORA_TARGETS_REGEX:-"(model\.vlm_with_expert\.(lm_expert\..*\.(q|k|v|o|gate|up|down)_proj|vlm\.model\.vision_model\.encoder\.layers\..*\.self_attn\.(q|k|v|out)_proj)|model\.(state_proj|action_in_proj|action_out_proj|action_time_mlp_in|action_time_mlp_out))"}
+# v3.2 (2026-04-25): N_ACTION_STEPS reduced to 10 to test hypothesis 3.
+# At chunk_size=50 (pretrain default), the policy commits to 50 steps of
+# action (≈1.6s at 30Hz) before re-querying observations. Combined with our
+# saturated P-controller demos producing stereotyped initial trajectories,
+# this likely makes the model emit a memorized stereotyped chunk that
+# ignores mid-execution visual feedback. With n_action_steps=10, the policy
+# re-queries every 10 steps (~0.33s), giving 5× more visual feedback within
+# an episode. chunk_size remains 50 internally (the prediction horizon),
+# only the EXECUTION horizon shrinks. Trade-off: 5× more inference calls
+# per eval episode → eval ~5× slower (~8.5 min for 10 episodes vs 7 min).
+N_ACTION_STEPS=${N_ACTION_STEPS:-10}
 
 # Budget watchdog. Set BUDGET_HOURS=0 to disable.
 BUDGET_HOURS=${BUDGET_HOURS:-0}

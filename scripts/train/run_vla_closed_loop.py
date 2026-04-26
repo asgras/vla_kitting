@@ -73,6 +73,14 @@ parser.add_argument("--gripper_threshold", type=float, default=None,
                          "Matches the env's BinaryJointPositionActionCfg "
                          "semantics (close on <0, open otherwise). Typical "
                          "value 0.0. Leave unset to pass policy output raw.")
+parser.add_argument("--use_rtc", action="store_true", default=False,
+                    help="Use predict_action_chunk-based inference (required "
+                         "for RTC). When True the script predicts a chunk of "
+                         "n_action_steps actions, executes them one at a "
+                         "time, then re-queries. RTC's internal prefix-"
+                         "attention mechanism is invoked inside "
+                         "predict_action_chunk when rtc_config.enabled=True "
+                         "in the saved policy config.")
 args_cli, _ = parser.parse_known_args()
 
 app_launcher = AppLauncher(headless=True, enable_cameras=True)
@@ -240,6 +248,10 @@ def main() -> int:
 
         success_this_ep = False
         truncated_this_ep = False
+        # Chunk-based inference state (only used when --use_rtc).
+        chunk_actions = None  # (n_action_steps, action_dim) tensor of post-processed actions
+        chunk_idx = 0
+        n_action_steps = int(getattr(policy.config, "n_action_steps", 1))
         for step in range(args_cli.max_steps):
             # Build an inference frame matching the dataset schema, then
             # preprocess (normalize images, tokenize task string).
@@ -255,9 +267,25 @@ def main() -> int:
             )
             batch = preprocess(frame)
 
-            # SmolVLA outputs a (1, action_dim) tensor; unnormalize via postprocess.
-            action = policy.select_action(batch)
-            action = postprocess(action)
+            if args_cli.use_rtc:
+                # Re-query the policy every n_action_steps frames. RTC's
+                # internal prefix-attention is engaged inside
+                # predict_action_chunk when rtc_config.enabled is set on the
+                # saved policy config.
+                if chunk_actions is None or chunk_idx >= n_action_steps:
+                    chunk = policy.predict_action_chunk(batch)
+                    # chunk shape: (1, chunk_size, action_dim). Take first n_action_steps.
+                    chunk = postprocess(chunk[:, :n_action_steps, :])
+                    if not torch.is_tensor(chunk):
+                        chunk = torch.as_tensor(chunk)
+                    chunk_actions = chunk.view(n_action_steps, -1)
+                    chunk_idx = 0
+                action = chunk_actions[chunk_idx].view(1, -1)
+                chunk_idx += 1
+            else:
+                # SmolVLA outputs a (1, action_dim) tensor; unnormalize via postprocess.
+                action = policy.select_action(batch)
+                action = postprocess(action)
 
             # The env expects a (1, 7) torch tensor on its own device.
             if not torch.is_tensor(action):

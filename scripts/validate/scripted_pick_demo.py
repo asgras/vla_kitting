@@ -350,9 +350,17 @@ def main() -> int:
                 u = t * t * (3.0 - 2.0 * t)
                 target_pos = phase_start_pos + (phase_end_pos - phase_start_pos) * u
 
-                # Position: P-controller, saturates at 10 cm position error.
+                # Position: P-controller, gain dropped to 2.0 in v4 to break
+                # the saturation pathology of the prior runs. At gain 10, any
+                # |pos_err| > 10 cm saturates action to ±1, making the first
+                # action of every demo nearly identical regardless of cube
+                # position (since home-to-target is always ~30-50 cm). At
+                # gain 2, saturation only kicks in at |pos_err| > 50 cm —
+                # rare in steady-state — so action varies linearly with
+                # error and per-cube-position trajectories become more
+                # distinguishable in the training data.
                 pos_err = target_pos - cur_pos
-                pos_delta = torch.clamp(pos_err * 10.0, -1.0, 1.0)
+                pos_delta = torch.clamp(pos_err * 2.0, -1.0, 1.0)
 
                 # Orientation: drive the EE toward the top-down target every step.
                 # apply_delta_pose interprets action[3:6] as a world-frame axis-angle
