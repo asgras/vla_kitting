@@ -50,8 +50,7 @@ checkpoints/
 datasets/
 
 # VLA pipeline V1
-logs/*.log
-logs/*.mp4
+logs/
 *.hdf5
 reports/rollouts/
 assets/*.usd
@@ -60,3 +59,31 @@ assets/*.usdc
 assets/configuration/
 # venv
 .venv/
+
+# Claude Code session state
+.claude/
+
+# Reports — track .md only; binary/eval artifacts live outside git (back up via scripts/backup/)
+reports/**/*.gif
+reports/**/*.mp4
+reports/**/*.csv
+reports/**/*.jsonl
+reports/**/*.out
+reports/**/*.npz
+reports/**/strips/
+reports/**/final_debug/
+reports/**/cam_check/
+reports/**/cam_check_postfix/
+reports/**/threshold_sweep/
+reports/**/ghost_check/
+reports/saved_checkpoints/
+# but DO track committed reference frames in camera_samples/
+!reports/camera_samples/*.png
+# and DO track per-run diaries
+!reports/runs/**/*.md
+!reports/**/*.md
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key

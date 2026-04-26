@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "vla_kitting",
+  "project_id": "9d3316dc-d74a-4ba9-8d6d-56c6cb7f6584"
+}

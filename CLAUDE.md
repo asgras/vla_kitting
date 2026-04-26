@@ -57,11 +57,28 @@ What still needs sign-off:
 
 ## Where to look
 
-- `CLAUDE_CODE_PLAN.md`, `VLA_KITTING_PLAN.md` — historical macro plans. Read once for context; do not take as current truth.
-- `reports/recovery_plan_2026-04-24.md` — the current execution plan (supersedes prior next-steps docs if present).
-- `reports/system_overview.md` — architecture snapshot; verify before citing.
+- `reports/README.md` — index of live reports. Always start here.
+- `reports/recovery_plan_2026-04-24.md` — the currently authoritative execution plan (supersedes prior next-steps docs if present). Phases past G3 have been advanced — verify status against the most recent dated report before acting.
+- `reports/research_log_synthesis_2026-04-26.md` — comprehensive index of every experiment / ablation / diagnostic to date. Start here for "what has been tried."
+- `reports/2026-04-26_overnight_session_summary.md` — most recent consolidated session summary (FXAA fix, v4 gripper-weight run, EE-positioning diagnosis).
+- `reports/system_overview.md` — architecture snapshot; verify before citing (it has aged).
 - `reports/known_issues.md` — running list of gotchas; append when you hit a new one.
 - `~/.claude/projects/-home-ubuntu-vla-kitting/memory/` — auto-memory for cross-session facts about the user and project. Not a substitute for `reports/`; memory holds *meta* (preferences, references), reports hold *experimental record*.
+
+## reports/ARCHIVE — do NOT reference
+
+`reports/ARCHIVE/` holds historical instruction docs (old phase plans, "next steps" docs, superseded run reports, abandoned-branch investigations) that were correct at the time they were written but have since been superseded, executed, or abandoned. They are kept only as a paper trail for post-mortems and bisection.
+
+**Rules for future sessions:**
+
+- Do **not** read files in `reports/ARCHIVE/` to figure out what to do next. Their commands, file paths, env-cfg values, and CLI flags are stale and will lead you astray.
+- Do **not** cite an archived document as a justification for an action.
+- Do **not** restore files from `ARCHIVE/` back into `reports/`. If a piece of guidance there is still useful, copy the relevant text into a *new dated report* and re-validate it.
+- Do **not** edit or extend files in `ARCHIVE/`. They are frozen.
+
+If the only doc that seems to answer your question lives in `ARCHIVE/`, that means the question hasn't been re-answered in a current report yet. Treat it as a gap and write a fresh report rather than reviving the archived one.
+
+`reports/ARCHIVE/README.md` lists every archived doc with a one-liner on why it was archived.
 
 ## Patches to external deps
 
@@ -70,3 +87,51 @@ Several local patches live against upstream repos (lerobot PEFT, IsaacLab kit). 
 ## Commit hygiene
 
 Commit messages should name the experiment the change serves, not just the diff. "Widen cube randomization to ±20cm for diversity_v2 run" beats "update env config." A future bisect needs to map commits to experimental state.
+
+
+<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
+## Beads Issue Tracker
+
+This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
+
+### Quick Reference
+
+```bash
+bd ready              # Find available work
+bd show <id>          # View issue details
+bd update <id> --claim  # Claim work
+bd close <id>         # Complete work
+```
+
+### Rules
+
+- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
+- Run `bd prime` for detailed command reference and session close protocol
+- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
+
+## Session Completion
+
+**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+
+**MANDATORY WORKFLOW:**
+
+1. **File issues for remaining work** - Create issues for anything that needs follow-up
+2. **Run quality gates** (if code changed) - Tests, linters, builds
+3. **Update issue status** - Close finished work, update in-progress items
+4. **PUSH TO REMOTE** - This is MANDATORY:
+   ```bash
+   git pull --rebase
+   bd dolt push
+   git push
+   git status  # MUST show "up to date with origin"
+   ```
+5. **Clean up** - Clear stashes, prune remote branches
+6. **Verify** - All changes committed AND pushed
+7. **Hand off** - Provide context for next session
+
+**CRITICAL RULES:**
+- Work is NOT complete until `git push` succeeds
+- NEVER stop before pushing - that leaves work stranded locally
+- NEVER say "ready to push when you are" - YOU must push
+- If push fails, resolve and retry until it succeeds
+<!-- END BEADS INTEGRATION -->
