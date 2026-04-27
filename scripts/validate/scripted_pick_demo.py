@@ -27,7 +27,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--num_demos", type=int, default=5)
 parser.add_argument("--dataset_file", type=str,
                     default=str(REPO / "datasets/teleop/cube_scripted.hdf5"))
-parser.add_argument("--max_steps_per_demo", type=int, default=1000)
+parser.add_argument("--max_steps_per_demo", type=int, default=1300)
 parser.add_argument("--gui", action="store_true", default=False,
                     help="Run with Isaac Sim viewport visible (DCV display). Default is headless.")
 parser.add_argument("--cube_xy", nargs="+", default=None,
@@ -135,10 +135,10 @@ def script_trajectory_waypoints(
     cube is rotated. The caller is responsible for building `q_target` from
     the same yaw so the gripper rotates to match the cube before descent.
 
-    Phases (total ~910 @ 30 Hz ≈ 30 s per demo):
-      A  approach+reorient    70  TRACK   above cube, rotate to top-down
+    Phases (total ~1140 @ 30 Hz ≈ 38 s per demo):
+      A  approach+reorient   200  TRACK   above cube, rotate to top-down
       B  hover settle         15  TRACK   kill residual drift
-      C  slow descent        100  TRACK   straight down to grasp
+      C  slow descent        200  TRACK   straight down to grasp
       D  settle at grasp      30  --      let cube rest under open pads (lengthened)
       E  close gripper       120  --      pinch, EE frozen (lengthened)
       F  lift straight up     90  --      pure +Z to LIFT_Z
@@ -171,12 +171,15 @@ def script_trajectory_waypoints(
     # BinaryJointPositionAction: actions < 0 => CLOSE, >= 0 => OPEN. So
     # gripper = +1.0 is OPEN, -1.0 is CLOSE.
     return [
-        # A: rise/rotate to top-down above cube.
-        {"ee_pos": torch.tensor([gx, gy, PICK_APPROACH_Z]), "gripper": +1.0, "steps": 70,  "track": True},
+        # A: rise/rotate to top-down above cube. Lengthened 70→200 (vla_kitting-2hp)
+        # to give the policy more frames where the cube is centrally visible to
+        # the third-person camera before grasp; smoothstep auto-rescales velocity.
+        {"ee_pos": torch.tensor([gx, gy, PICK_APPROACH_Z]), "gripper": +1.0, "steps": 200, "track": True},
         # B: hover-settle above cube (bias-compensated).
         {"ee_pos": torch.tensor([gx, gy, PICK_APPROACH_Z]), "gripper": +1.0, "steps": 15,  "track": True},
-        # C: slow pure-vertical descent to bias-compensated grasp.
-        {"ee_pos": torch.tensor([gx, gy, PICK_GRASP_Z]),    "gripper": +1.0, "steps": 100, "track": True},
+        # C: slow pure-vertical descent to bias-compensated grasp. Lengthened
+        # 100→200 (vla_kitting-2hp) for the same reason as Phase A.
+        {"ee_pos": torch.tensor([gx, gy, PICK_GRASP_Z]),    "gripper": +1.0, "steps": 200, "track": True},
         # D: settle with pads straddling the cube. Tracking OFF — freezes
         #    the EE so the cube can rest, and we commit to grasp xy now.
         {"ee_pos": torch.tensor([gx, gy, PICK_GRASP_Z]),    "gripper": +1.0, "steps": 30,  "track": False},
@@ -236,6 +239,12 @@ def main() -> int:
     strict = not args_cli.no_strict
 
     env_cfg = parse_env_cfg(TASK, device="cuda:0", num_envs=1)
+    # Phases A (200) + B (15) + C (200) + D (30) + E (120) + F (90) + G1-G3 (300)
+    # + H (30) + I (75) + J (40) + K (40) = 1140 steps @ 30 Hz ≈ 38 s. Default
+    # env episode_length_s=30 truncates at 900 steps — no demo would finish.
+    # Override here at the script level (instead of editing the env cfg, which
+    # would invalidate prior baselines per CLAUDE.md). vla_kitting-2hp.
+    env_cfg.episode_length_s = 45.0
     env_cfg.recorders = ActionStateRecorderManagerCfg()
     env_cfg.recorders.dataset_export_dir_path = str(dataset_path.parent)
     env_cfg.recorders.dataset_filename = dataset_path.stem
