@@ -109,29 +109,47 @@ bd close <id>         # Complete work
 - Run `bd prime` for detailed command reference and session close protocol
 - Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
 
-## Session Completion
+## Land the plan (per-bd-issue closure protocol)
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+**Every "run" in this repo == one bd issue.** After you finish the work for an issue — before you say "done", before you move to the next issue, before you ask the user anything else — you MUST execute the Land the plan checklist below in order. No exceptions. The work is not complete until step 5 emits a handoff prompt and `git push` has succeeded.
 
-**MANDATORY WORKFLOW:**
+### The five steps (do them in order, every time)
 
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
+1. **Run quality gates.** If code changed, run the relevant tests and linters for the area you touched. Note results (pass/fail, which suite) in the bd issue's `--notes` or in the run's report entry. If a gate fails, fix it before proceeding — do not paper over with skips or `--no-verify`.
+2. **File any remaining discovered work as bd issues.** Anything you noticed mid-run that's out of scope — a flaky test, a TODO you couldn't address, a follow-up experiment, a stale doc — gets a `bd create` *now*, with priority and a one-line description. Add `bd dep add` if it's blocked by something. Lost context = lost work.
+3. **Close finished bd issues.** `bd close <id>` for the issue you just finished, plus any other issues this work resolved. Use `bd close <id1> <id2> ...` for multiples. If closing leaves something in a partial state, update the issue with `--notes` first, then close with `--reason`.
+4. **Pull, sync, and push to remote.** This sequence is mandatory and must succeed:
    ```bash
    git pull --rebase
+   bd dolt pull
    bd dolt push
    git push
    git status  # MUST show "up to date with origin"
    ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
+   If push fails (rejected, conflicts, hook errors), resolve the root cause and retry. Do not stop with work stranded locally. Do not bypass hooks.
+5. **Generate a handoff prompt for the next session.** After the issue is closed and pushed, emit a short handoff block as the *last* thing in your final reply for that issue. Format:
+   ```
+   ### Handoff — next session
+   - Just closed: <bd-id> — <one-line summary of what shipped>
+   - Repo state: branch <name>, HEAD <short-sha>, clean / dirty
+   - Next ready issues (from `bd ready`): <id1>, <id2>, ...
+   - Recommended next: <id> — <why this one is the right next step>
+   - Open questions / risks: <anything the next session should know>
+   - Resume command: `bd update <id> --claim && bd show <id>`
+   ```
+   The handoff is not optional — it is how the next session picks up cold without re-deriving context. Keep it tight: a future agent should be able to act on it in under 30 seconds.
 
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
+### When to land the plan
+
+- After **every bd issue you close**, even small ones. The protocol is per-issue, not per-session.
+- If a single piece of work spans multiple bd issues, land the plan after the *last* one closes. Intermediate issues still get closed, but you can batch the push and handoff.
+- If the user interrupts mid-issue and tells you to stop, still run steps 2–4 (file remainder, update status, push) before signing off, and emit a partial handoff noting the in-progress issue.
+
+### Hard rules
+
+- Work is NOT complete until `git push` succeeds AND the handoff prompt has been emitted.
+- NEVER stop before pushing — that leaves work stranded locally.
+- NEVER say "ready to push when you are" — YOU must push.
+- NEVER skip the handoff because "the next session will figure it out." The next session is also you, with no memory.
+- If you discover the issue you're closing was actually wrong-headed, say so in the close `--reason` and file a corrective issue in step 2 rather than silently abandoning.
 <!-- END BEADS INTEGRATION -->
