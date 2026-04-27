@@ -42,26 +42,37 @@ VENV_PY=$REPO/.venv/bin/python
 # --- Knobs ---
 TRAIN_STEPS=${TRAIN_STEPS:-1000}
 TRAIN_SAVE_FREQ=${TRAIN_SAVE_FREQ:-$TRAIN_STEPS}
-TRAIN_BATCH=${TRAIN_BATCH:-4}
-TRAIN_LR=${TRAIN_LR:-1e-4}
+# v5 (2026-04-27): batch 4 -> 16. Audit (reports/2026-04-27_smolvla_best_practices_audit.md)
+# flagged the prior batch=4 as 16x under the paper / lerobot tutorial
+# recommendation of 64. lerobot has no gradient accumulation knob, so we
+# can only push the per-step batch directly. 16 is the largest step toward
+# 64 that's plausibly safe given the 2026-04-27 image-resolution bump
+# (third 256->512, wrist 128->256 — 4x more pixels per sample). If this
+# OOMs at the new resolution, drop to 8 first; 4 is the previous floor.
+TRAIN_BATCH=${TRAIN_BATCH:-16}
+# v5 (2026-04-27): LR 1e-4 -> 1e-3. Audit cited the lerobot PEFT tutorial
+# recommendation of 10x the full-FT LR for LoRA fine-tuning. Combined with
+# the larger batch (16 vs 4), gradient signal-to-noise should now favour
+# the higher LR. Constant schedule retained — see scheduler args below.
+TRAIN_LR=${TRAIN_LR:-1e-3}
 EVAL_EPISODES=${EVAL_EPISODES:-10}
 EVAL_EVERY_N=${EVAL_EVERY_N:-10}
 USE_LORA=${USE_LORA:-1}
 LORA_R=${LORA_R:-64}
 LORA_ALPHA=${LORA_ALPHA:-64}
 LORA_DROPOUT=${LORA_DROPOUT:-0.05}
-# v3.1 (2026-04-25): vision tower LoRA RE-ENABLED. v3 froze the vision tower
-# entirely per SmolVLA paper canonical (real-robot finding from "Accessible
-# Physical AI"). At epoch 30 the policy showed mode collapse — cube was
-# pushed but never lifted, eval cubes received the same approach trajectory
-# regardless of cube location. Diagnosis: frozen internet-pretrained ViT
-# features lacked spatial discrimination for our synthetic Isaac Sim scene
-# (small cube on brown table, fixed third-person camera). Re-adding LoRA on
-# vision attention projections gives the encoder a small task-specific
-# surface to specialize cube-position features. Module path verified by
-# instantiating SmolVLM2 — uses `self_attn` (not self_attention) and
-# `out_proj` (not o_proj).
-LORA_TARGETS_REGEX=${LORA_TARGETS_REGEX:-"(model\.vlm_with_expert\.(lm_expert\..*\.(q|k|v|o|gate|up|down)_proj|vlm\.model\.vision_model\.encoder\.layers\..*\.self_attn\.(q|k|v|out)_proj)|model\.(state_proj|action_in_proj|action_out_proj|action_time_mlp_in|action_time_mlp_out))"}
+# v5 (2026-04-27): vision tower LoRA REMOVED. Audit
+# (reports/2026-04-27_smolvla_best_practices_audit.md) re-evaluated the v3.1
+# decision to LoRA the vision tower against (a) SmolVLA paper canonical
+# (freeze_vision_encoder=True, train_expert_only=True) and (b) the
+# 2026-04-27 v4 vision-grounding diagnostic showing third-person vision is
+# NOT being used as a cube-localization signal anyway (median residual-argmax
+# err 147 px on a 256² image, corr_X≈0.15). Conclusion: vision LoRA was
+# costing parameter budget without paying it back. Reverting to the paper
+# canonical for v5; if mode collapse re-appears, prefer the v5-plan
+# alternatives (aux cube-localization head, augmentations, wider distribution)
+# over re-enabling vision LoRA.
+LORA_TARGETS_REGEX=${LORA_TARGETS_REGEX:-"(model\.vlm_with_expert\.lm_expert\..*\.(q|k|v|o|gate|up|down)_proj|model\.(state_proj|action_in_proj|action_out_proj|action_time_mlp_in|action_time_mlp_out))"}
 # v3.2 (2026-04-25): N_ACTION_STEPS reduced to 10 to test hypothesis 3.
 # At chunk_size=50 (pretrain default), the policy commits to 50 steps of
 # action (≈1.6s at 30Hz) before re-querying observations. Combined with our
@@ -276,7 +287,7 @@ while true; do
         --policy.action_loss_dim_weights='[1.0,1.0,1.0,1.0,1.0,1.0,16.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0]'
       )
       _log "fresh start from lerobot/smolvla_base + LoRA r=$LORA_R alpha=$LORA_ALPHA dropout=$LORA_DROPOUT, constant LR=$TRAIN_LR"
-      _log "  vision tower LoRA + lm_expert + action projections; modules_to_save=[action_out_proj]"
+      _log "  v5: lm_expert (q,k,v,o,gate,up,down) + action projections; vision tower FROZEN; modules_to_save=[action_out_proj]"
       _log "  action_loss_dim_weights=[1,1,1,1,1,1,16] (gripper × 16) — v4-w16 stronger Hole B push"
     else
       _log "fresh start from lerobot/smolvla_base (full fine-tune), constant LR=$TRAIN_LR"
