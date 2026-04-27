@@ -58,9 +58,14 @@ TRAIN_LR=${TRAIN_LR:-1e-3}
 EVAL_EPISODES=${EVAL_EPISODES:-10}
 EVAL_EVERY_N=${EVAL_EVERY_N:-10}
 USE_LORA=${USE_LORA:-1}
-LORA_R=${LORA_R:-64}
-LORA_ALPHA=${LORA_ALPHA:-64}
-LORA_DROPOUT=${LORA_DROPOUT:-0.05}
+# v5 (2026-04-27, vla_kitting-8ux): LoRA shrink to Run B prime's recipe — the
+# only checkpoint that ever cleared >=2/10 SR. r=16, alpha=8 (= r/2 underdamping
+# per the original RunB diff). dropout=0.0 because Run B prime had it disabled.
+# v3/v3.1/v3.2/v4 used r=64, alpha=64, dropout=0.05 — over-parameterized + over-
+# regularized for our 750-demo dataset, plausibly contributing to mode collapse.
+LORA_R=${LORA_R:-16}
+LORA_ALPHA=${LORA_ALPHA:-8}
+LORA_DROPOUT=${LORA_DROPOUT:-0.0}
 # v5 (2026-04-27): vision tower LoRA REMOVED. Audit
 # (reports/2026-04-27_smolvla_best_practices_audit.md) re-evaluated the v3.1
 # decision to LoRA the vision tower against (a) SmolVLA paper canonical
@@ -72,7 +77,13 @@ LORA_DROPOUT=${LORA_DROPOUT:-0.05}
 # canonical for v5; if mode collapse re-appears, prefer the v5-plan
 # alternatives (aux cube-localization head, augmentations, wider distribution)
 # over re-enabling vision LoRA.
-LORA_TARGETS_REGEX=${LORA_TARGETS_REGEX:-"(model\.vlm_with_expert\.lm_expert\..*\.(q|k|v|o|gate|up|down)_proj|model\.(state_proj|action_in_proj|action_out_proj|action_time_mlp_in|action_time_mlp_out))"}
+# v5 (2026-04-27, vla_kitting-8ux): regex narrowed to Run B prime's adapter set
+# exactly. lm_expert q,v ONLY (no o/k/gate/up/down) + the four action-side
+# projections + action_time_mlp_in/out. Vision tower stays out (was stripped
+# in the prior v5 commit). Dropping the wider lm_expert targets is the
+# 'LoRA shrink' part of the v5 hypothesis: smaller adapter = less freedom to
+# bulldoze the cube without learning the gripper transition.
+LORA_TARGETS_REGEX=${LORA_TARGETS_REGEX:-"(model\.vlm_with_expert\.lm_expert\..*\.(q|v)_proj|model\.(state_proj|action_in_proj|action_out_proj|action_time_mlp_in|action_time_mlp_out))"}
 # v3.2 (2026-04-25): N_ACTION_STEPS reduced to 10 to test hypothesis 3.
 # At chunk_size=50 (pretrain default), the policy commits to 50 steps of
 # action (≈1.6s at 30Hz) before re-querying observations. Combined with our
@@ -259,36 +270,22 @@ while true; do
         --peft.lora_alpha="$LORA_ALPHA"
         --peft.lora_dropout="$LORA_DROPOUT"
         --peft.target_modules="$LORA_TARGETS_REGEX"
-        # modules_to_save (via lerobot's full_training_modules alias):
-        # promote only the final action-head output projection (action_out_proj)
-        # from LoRA-delta to fully-trained — it's the one module directly
-        # emitting the 7D action. action_time_mlp_out is LoRA'd per the
-        # broader community consensus that over-promoting modules_to_save
-        # shrinks the LoRA regularization benefit.
-        --peft.full_training_modules='[action_out_proj]'
-        # v4 (2026-04-26): per-dim action loss weight on action[6] (gripper).
-        # v3/v3.1/v3.2 ran "canonical uniform MSE" (recovery plan §3 Hole B
-        # ablation-add-back) and produced policies that bulldoze the cube
-        # without ever closing the gripper. The gripper is +1.0 for ~30% of
-        # demo frames then -1.0, with the transition localized to ~1 step;
-        # under flat L2 across 7 dims, regressing the gripper to ~+0.9
-        # throughout is near-optimal-lazy. Weight 8.0 is the recovery plan's
-        # "strong but not dominant" recommendation. The lerobot patch wiring
-        # this through is documented in
-        # project_lerobot_peft_resume_patch.md; field name confirmed at
-        # lerobot/policies/smolvla/configuration_smolvla.py:113.
-        # Length must match max_action_dim (32 in SmolVLA flow matching),
-        # NOT the env's action_dim (7). First 6 entries cover pose deltas,
-        # entry 7 is gripper (×16 — bumped from 8 mid-run on 2026-04-26
-        # when v4-w8 hit 0/N real successes through epoch 20 with loss
-        # plateaued at 0.031 and dz=0 across all eval episodes; gripper
-        # was clearly not being learned), entries 8-32 are padding dims
-        # masked out via action_padding_mask (weight value doesn't matter).
-        --policy.action_loss_dim_weights='[1.0,1.0,1.0,1.0,1.0,1.0,16.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0]'
+        # v5 (2026-04-27, vla_kitting-8ux): full_training_modules dropped.
+        # Run B prime did NOT promote any module to modules_to_save — pure
+        # LoRA on action_out_proj was the only working recipe. Re-introducing
+        # full_training_modules in v3.1+ moved us off Run B's working point.
+        # If v5 SR is 0/30 we'll consider this; otherwise stay pure LoRA.
+        #
+        # v5 (2026-04-27, vla_kitting-8ux): action_loss_dim_weights dropped.
+        # Run B prime ran canonical uniform MSE; v4's gripper×16 weighting was
+        # introduced AFTER v3 already had 0-SR runs on a different dataset, so
+        # the weighting wasn't isolated as a fix. Reverting to uniform here so
+        # v5's success/failure is attributable to the LoRA shrink + dataset
+        # changes, not a confounded loss reweighting. If gripper-collapse
+        # returns we'll re-introduce gripper weighting as v5c ablation.
       )
       _log "fresh start from lerobot/smolvla_base + LoRA r=$LORA_R alpha=$LORA_ALPHA dropout=$LORA_DROPOUT, constant LR=$TRAIN_LR"
-      _log "  v5: lm_expert (q,k,v,o,gate,up,down) + action projections; vision tower FROZEN; modules_to_save=[action_out_proj]"
-      _log "  action_loss_dim_weights=[1,1,1,1,1,1,16] (gripper × 16) — v4-w16 stronger Hole B push"
+      _log "  v5: lm_expert (q,v) + action projections only; vision tower FROZEN; pure LoRA (no modules_to_save); uniform action loss"
     else
       _log "fresh start from lerobot/smolvla_base (full fine-tune), constant LR=$TRAIN_LR"
     fi

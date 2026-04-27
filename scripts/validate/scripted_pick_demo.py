@@ -45,6 +45,14 @@ parser.add_argument("--no_strict", action="store_true", default=False,
                          "in success detection and HDF5 color-metadata stamping — silent "
                          "fallbacks here have invalidated training runs in the past. Pass "
                          "this flag to restore the old soft-fail behaviour.")
+parser.add_argument("--seed", type=int, default=None,
+                    help="Seed for environment RNG (Python random / numpy / torch). "
+                         "Plumbed through to env_cfg.seed so cube position, yaw and color "
+                         "randomization are reproducible AND distinct across parallel "
+                         "shards. Used by scripts/orchestrate/parallel_scripted_demo_gen.sh "
+                         "to fan out ~750 demos across 4 processes without colliding on "
+                         "the same trajectories. If omitted, IsaacLab leaves the env "
+                         "unseeded (non-reproducible) — pass any int for reproducibility.")
 args_cli, _ = parser.parse_known_args()
 
 app_launcher = AppLauncher(headless=not args_cli.gui, enable_cameras=True)
@@ -245,6 +253,14 @@ def main() -> int:
     # Override here at the script level (instead of editing the env cfg, which
     # would invalidate prior baselines per CLAUDE.md). vla_kitting-2hp.
     env_cfg.episode_length_s = 45.0
+    # Seed plumbing — IsaacLab's manager_based_env reads env_cfg.seed at __init__
+    # and routes it through configure_seed(), which seeds Python random / numpy
+    # / torch. randomize_cube_color (envs/mdp/events.py) uses Python random, so
+    # a distinct seed per shard guarantees distinct cube color sequences too.
+    # vla_kitting-8rf.
+    if args_cli.seed is not None:
+        env_cfg.seed = args_cli.seed
+        _log(f"env seed set to {args_cli.seed}")
     env_cfg.recorders = ActionStateRecorderManagerCfg()
     env_cfg.recorders.dataset_export_dir_path = str(dataset_path.parent)
     env_cfg.recorders.dataset_filename = dataset_path.stem
