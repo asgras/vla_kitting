@@ -20,6 +20,27 @@ def cube_position_in_world_frame(
     return obj.data.root_pos_w
 
 
+def cube_color_idx(env: "ManagerBasedRLEnv") -> torch.Tensor:
+    """Per-env palette index of the cube's current color (constant within an
+    episode; set at reset by the `randomize_cube_color` event). Stored as a
+    (N, 1) float32 tensor so it survives the recorder's flat-policy-obs
+    pipeline. Out-of-range / pre-reset envs read 0 (the first palette
+    entry).
+
+    The integer index is the canonical handle, NOT the RGB triple — strings
+    can't pass through the float observation pipeline. Downstream callers
+    map the index back to a color word via
+    `envs.mdp.cube_palette.color_name_for_idx`.
+    """
+    n = env.num_envs
+    out = torch.zeros((n, 1), dtype=torch.float32, device=env.device)
+    state = getattr(env, "cube_color_state", None) or {}
+    for i, (_name, idx) in state.items():
+        if 0 <= int(i) < n:
+            out[int(i), 0] = float(idx)
+    return out
+
+
 def ee_pose_world(
     env: "ManagerBasedRLEnv",
     robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),

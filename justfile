@@ -128,29 +128,6 @@ train-smoke:
         --batch_size=2 --steps=20 --log_freq=5 --save_freq=10 \
         --wandb.enable=false
 
-# ---------- Continual training orchestrator (see reports/continual_training_plan.md) ----------
-# Long-running loop: seed, then Mimic gen in background + SmolVLA training in
-# foreground, with training picking up new demos at each epoch. Logs to
-# logs/continual/*.log; stop with `touch logs/continual/STOP`.
-continual-train:
-    bash {{REPO}}/scripts/orchestrate/continual_train.sh
-
-continual-reset:
-    bash {{REPO}}/scripts/orchestrate/continual_train.sh --reset
-
-continual-status:
-    @jq . {{REPO}}/logs/continual/state.json 2>/dev/null || echo "no state.json yet"
-    @echo "--- last 5 Mimic batches ---"
-    @tail -5 {{REPO}}/logs/continual/batch_summary.jsonl 2>/dev/null | jq -c . || echo "(no batches yet)"
-    @echo "--- last 5 training epochs ---"
-    @tail -5 {{REPO}}/logs/continual/epoch_summary.jsonl 2>/dev/null | jq -c . || echo "(no epochs yet)"
-    @echo "--- GPU ---"
-    @nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader | head -5
-
-continual-stop:
-    touch {{REPO}}/logs/continual/STOP
-    @echo "STOP file created; loops will exit after their current iteration."
-
 # Run a trained SmolVLA checkpoint in closed-loop on the cube-pick env.
 # Writes side-by-side gif of first episode to reports/vla_rollout.gif.
 #   just run-vla                                      # latest smoke checkpoint

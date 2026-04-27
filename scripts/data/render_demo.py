@@ -48,28 +48,31 @@ def render(
             if "wrist_cam" not in obs or "third_person_cam" not in obs:
                 _log("side_by_side requested but one of wrist_cam/third_person_cam missing")
                 return 1
-            wrist = obs["wrist_cam"][...]       # (T, 128, 128, 3)
-            third = obs["third_person_cam"][...]  # (T, 256, 256, 3)
-            # Upscale wrist to match third's height (256) for a clean hstack.
+            wrist = obs["wrist_cam"][...]       # (T, Hw, Ww, 3)
+            third = obs["third_person_cam"][...]  # (T, Ht, Wt, 3)
+            # Upscale wrist to match third's height for a clean hstack. Both
+            # camera resolutions can change in env cfg — read them off the data.
             from PIL import Image
             T = wrist.shape[0]
-            frames = np.zeros((T, 256, 256 + 256, 3), dtype=np.uint8)
+            Ht, Wt = third.shape[1], third.shape[2]
+            frames = np.zeros((T, Ht, Ht + Wt, 3), dtype=np.uint8)
             for t in range(T):
                 up = np.array(
-                    Image.fromarray(wrist[t]).resize((256, 256), Image.NEAREST),
+                    Image.fromarray(wrist[t]).resize((Ht, Ht), Image.NEAREST),
                     dtype=np.uint8,
                 )
-                frames[t, :, :256] = up
-                frames[t, :, 256:] = third[t]
+                frames[t, :, :Ht] = up
+                frames[t, :, Ht:] = third[t]
         else:
             if cam not in obs:
                 _log(f"camera '{cam}' not in obs (have {list(obs.keys())})")
                 return 1
             frames = obs[cam][...]
 
+    T_pre = frames.shape[0]
     if stride > 1:
         frames = frames[::stride]
-        _log(f"subsampled every {stride}th frame ({frames.shape[0]} of {T})")
+        _log(f"subsampled every {stride}th frame ({frames.shape[0]} of {T_pre})")
     T, H, W, C = frames.shape
 
     # GIF branch: imageio's pillow writer handles these in 2 lines.

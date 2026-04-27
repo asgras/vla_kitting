@@ -68,6 +68,7 @@ class _MimicPolicyCfg(ObsGroup):
     gripper_pos = ObsTerm(func=mdp.gripper_pos)
     gripper_closed = ObsTerm(func=mdp.gripper_is_closed)
     cube_pos = ObsTerm(func=mdp.cube_position_in_world_frame)
+    cube_color_idx = ObsTerm(func=mdp.cube_color_idx)
     actions = ObsTerm(func=mdp.last_action)
     wrist_cam = ObsTerm(
         func=mdp.image,
@@ -163,8 +164,8 @@ class YaskawaPickCubeIkRelMimicEnvCfg(YaskawaPickCubeIkRelEnvCfg, MimicEnvCfg):
                 num_interpolation_steps=5,
                 num_fixed_steps=0,
                 apply_noise_during_interpolation=False,
-                description="Transport cube above the green target",
-                next_subtask_description="Release cube onto the target",
+                description="Transport cube above the magenta circle",
+                next_subtask_description="Release cube onto the magenta circle",
             )
         )
         subtask_configs.append(

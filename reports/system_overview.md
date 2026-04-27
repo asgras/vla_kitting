@@ -1,5 +1,16 @@
 # VLA Kitting — What This Repo Is, and How to Think About It
 
+> **2026-04-27 amendment.** The data-pyramid section ("human demos → Mimic
+> → LeRobot") and the architecture diagrams that show `mimic_generate.sh`
+> describe the pipeline as it was when this overview was written. As of
+> 2026-04-27 we use SCRIPTED demos exclusively going forward; Mimic
+> generation has been removed from the active pipeline. The Mimic env
+> cfg, orchestration scripts, and annotate_demos wrapper remain in the
+> tree as historical artifacts but are not invoked by any current plan.
+> See `reports/2026-04-27_scripted_only_data_pipeline.md`. Read this
+> document for the conceptual background and historical pipeline shape;
+> consult dated reports for what's actually live now.
+
 ## Part 1 — Background concepts (robotics/ML intuition, no jargon dump)
 
 ### What a VLA actually is
@@ -37,6 +48,14 @@ After that, the HDF5s get converted to **LeRobot's v3 dataset format** — Parqu
 ---
 
 ## Part 2 — What's actually in this repo
+
+> **Stale banner (2026-04-27):** the orchestration architecture below describes the
+> deprecated continual-train + Mimic loop. `scripts/orchestrate/continual_train.sh`
+> and the Mimic-pool validators have been removed; the live pipeline is
+> `scripts/validate/scripted_pick_demo.py` → `scripts/data/isaaclab_to_lerobot.py`
+> → `scripts/orchestrate/train_only.sh`. See
+> `reports/2026-04-27_scripted_only_data_pipeline.md` for the rationale and the
+> rewritten Phase 2 of `recovery_plan_2026-04-24.md`.
 
 ### The layered architecture
 

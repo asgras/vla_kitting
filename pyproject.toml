@@ -1,0 +1,49 @@
+[project]
+name = "vla_kitting"
+version = "0.1.0"
+description = "VLA cube-pick pipeline (SmolVLA + LoRA on Isaac Lab Mimic demos, Yaskawa HC10DT)"
+requires-python = ">=3.12"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [
+    ".venv",
+    "source",
+    "kitting_vla/scripts",
+    "reports/ARCHIVE",
+    "patches",
+    "assets",
+    "datasets",
+    "checkpoints",
+    "logs",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long — formatter handles it
+    "E402",  # module-level import not at top — required for IsaacSim AppLauncher pattern
+    "E741",  # ambiguous variable name (l, I, O) — common in math/robotics code
+    "B008",  # function call in default arg — common pytest fixture pattern
+    "UP007", # X | Y union — keep typing.Optional readable for older readers
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["F401", "F811"]  # unused imports + redefinitions are OK in test fixtures
+"scripts/validate/**" = ["F401"]  # validation scripts often import for side effects
+"envs/**" = ["F401"]  # __init__ side-effect imports for env registration
+
+[tool.ruff.lint.isort]
+known-first-party = ["envs", "scripts", "tests"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

@@ -11,8 +11,8 @@ Expected input (HDF5):
             /obs/gripper_pos               shape (T, 1)    # Mimic-annotated demos
             /obs/gripper_closed            shape (T, 1)
             /obs/cube_pos                  shape (T, 3)
-            /obs/wrist_cam                 shape (T, 128, 128, 3) uint8
-            /obs/third_person_cam          shape (T, 256, 256, 3) uint8
+            /obs/wrist_cam                 shape (T, 256, 256, 3) uint8
+            /obs/third_person_cam          shape (T, 512, 512, 3) uint8
             /actions                       shape (T, 7)
 
 Output (LeRobotDataset v3 directory):
@@ -30,7 +30,7 @@ Usage:
         --input datasets/mimic/cube_mimic.hdf5 \\
         --output datasets/lerobot/cube_pick_v1 \\
         --repo_id vla_kitting/cube_pick_v1 \\
-        --task "pick up the cube and place it on the green target"
+        --task "pick up the cube and place it on the magenta circle"
 
 By default this runs WITHOUT video encoding (use_videos=False) — saves as PNG
 frames, which is simpler + doesn't require ffmpeg + svt-av1. Add --use_videos
@@ -44,6 +44,45 @@ import sys
 
 import h5py
 import numpy as np
+
+
+# Mirror of envs/mdp/cube_palette.py — kept inline so the converter can run
+# under /opt/IsaacSim/python.sh without dragging in the Isaac stage. If you
+# add or reorder palette entries here, update envs/mdp/cube_palette.py too.
+_CUBE_COLOR_NAMES: list[str] = ["red", "blue", "yellow", "orange", "purple"]
+
+
+def _format_task_with_color(color_name: str | None, default: str) -> str:
+    """Per-episode prompt. If we have a color, fill the slot; otherwise fall
+    back to whatever was passed via --task (preserves old-dataset behavior)."""
+    if color_name:
+        return f"pick up the {color_name} cube and place it on the magenta circle"
+    return default
+
+
+def _resolve_episode_task(demo: h5py.Group, default_task: str) -> str:
+    """Decide the per-episode prompt for a demo. Order of precedence:
+       1. demo.attrs["task"] (set by scripted_pick_demo post-export).
+       2. demo.attrs["cube_color"] → format with that color name.
+       3. /obs/cube_color_idx[0,0] → look up name in _CUBE_COLOR_NAMES.
+       4. fall back to default_task.
+    """
+    attrs = demo.attrs
+    if "task" in attrs:
+        v = attrs["task"]
+        return v.decode() if isinstance(v, bytes) else str(v)
+    if "cube_color" in attrs:
+        v = attrs["cube_color"]
+        name = v.decode() if isinstance(v, bytes) else str(v)
+        return _format_task_with_color(name, default_task)
+    obs = demo.get("obs")
+    if obs is not None and "cube_color_idx" in obs:
+        idx_arr = obs["cube_color_idx"][...]
+        if idx_arr.size > 0:
+            idx = int(np.asarray(idx_arr).flat[0])
+            if 0 <= idx < len(_CUBE_COLOR_NAMES):
+                return _format_task_with_color(_CUBE_COLOR_NAMES[idx], default_task)
+    return default_task
 
 
 def _log(msg: str) -> None:
@@ -89,12 +128,12 @@ def _build_features(state_dim: int, use_videos: bool, drop_cube_pos: bool = Fals
         },
         "observation.images.wrist": {
             "dtype": cam_dtype,
-            "shape": (128, 128, 3),
+            "shape": (256, 256, 3),
             "names": ["height", "width", "channels"],
         },
         "observation.images.third_person": {
             "dtype": cam_dtype,
-            "shape": (256, 256, 3),
+            "shape": (512, 512, 3),
             "names": ["height", "width", "channels"],
         },
         "action": {
@@ -250,10 +289,16 @@ def convert(
             use_videos=use_videos,
         )
 
+        # Track the distribution of per-episode prompts so the operator can
+        # eyeball whether color randomization is balanced before training.
+        ep_task_counts: dict[str, int] = {}
+
         for i, key in enumerate(demo_keys):
             demo = data[key]
             actions_full = demo["actions"][...].astype(np.float32)
             T_full = actions_full.shape[0]
+            ep_task = _resolve_episode_task(demo, task)
+            ep_task_counts[ep_task] = ep_task_counts.get(ep_task, 0) + 1
 
             state_full = demo["obs"]["joint_pos"][...].astype(np.float32)
             ee_pose_full = _build_ee_pose(demo)
@@ -287,16 +332,20 @@ def convert(
                     "observation.images.wrist": wrist[t],
                     "observation.images.third_person": third[t],
                     "action": actions[t],
-                    "task": task,
+                    "task": ep_task,
                 }
                 if not drop_cube_pos:
                     frame["observation.cube_pos"] = cube_pos[t]
                 ds.add_frame(frame)
             ds.save_episode()
             _log(f"  [{i + 1}/{len(demo_keys)}] saved {key} ({T} frames"
-                 f"{f', stride={stride} from {T_full}' if stride > 1 else ''})")
+                 f"{f', stride={stride} from {T_full}' if stride > 1 else ''}) "
+                 f"task={ep_task!r}")
 
     _log(f"done — wrote {len(demo_keys)} episodes to {dst_root}")
+    _log("per-episode prompt distribution:")
+    for t, n in sorted(ep_task_counts.items(), key=lambda kv: (-kv[1], kv[0])):
+        _log(f"  {n:>4}  {t}")
     return 0
 
 
@@ -308,7 +357,7 @@ def main() -> int:
     ap.add_argument("--repo_id", type=str, required=True,
                     help="HF-style repo id, e.g. vla_kitting/cube_pick_v1")
     ap.add_argument("--task", type=str,
-                    default="pick up the cube and place it on the pink square")
+                    default="pick up the cube and place it on the magenta circle")
     ap.add_argument("--drop_cube_pos", action="store_true", default=False,
                     help="Omit observation.cube_pos from the LeRobot feature "
                          "schema so the policy cannot regress from privileged "

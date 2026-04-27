@@ -30,6 +30,21 @@ parser.add_argument("--dataset_file", type=str,
 parser.add_argument("--max_steps_per_demo", type=int, default=1000)
 parser.add_argument("--gui", action="store_true", default=False,
                     help="Run with Isaac Sim viewport visible (DCV display). Default is headless.")
+parser.add_argument("--cube_xy", nargs="+", default=None,
+                    help="List of forced cube XY positions as 'x,y' strings (world frame). "
+                         "When supplied, each is tested once with the cube force-placed via "
+                         "write_root_pose_to_sim (yaw=0); overrides --num_demos and disables "
+                         "retry budget. Used for corner-coverage sanity checks of the spawn "
+                         "region — see bd vla_kitting-v67.")
+parser.add_argument("--overwrite", action="store_true", default=False,
+                    help="If --dataset_file already exists, delete it before recording. "
+                         "Without this flag, an existing file aborts the run to prevent "
+                         "accidentally clobbering a prior dataset.")
+parser.add_argument("--no_strict", action="store_true", default=False,
+                    help="Disable strict mode. By default the script re-raises exceptions "
+                         "in success detection and HDF5 color-metadata stamping — silent "
+                         "fallbacks here have invalidated training runs in the past. Pass "
+                         "this flag to restore the old soft-fail behaviour.")
 args_cli, _ = parser.parse_known_args()
 
 app_launcher = AppLauncher(headless=not args_cli.gui, enable_cameras=True)
@@ -66,37 +81,7 @@ def _quat_from_downward_xy_yaw(yaw: float) -> "torch.Tensor":
     return torch.tensor([w, x, y, z])
 
 
-def _quat_mul(a, b):
-    """Hamilton product of two quats in (w, x, y, z) form."""
-    import torch
-    aw, ax, ay, az = a.unbind(-1)
-    bw, bx, by, bz = b.unbind(-1)
-    return torch.stack([
-        aw*bw - ax*bx - ay*by - az*bz,
-        aw*bx + ax*bw + ay*bz - az*by,
-        aw*by - ax*bz + ay*bw + az*bx,
-        aw*bz + ax*by - ay*bx + az*bw,
-    ], dim=-1)
-
-
-def _quat_conj(q):
-    import torch
-    w, x, y, z = q.unbind(-1)
-    return torch.stack([w, -x, -y, -z], dim=-1)
-
-
-def _quat_err_axis_angle(q_cur, q_des):
-    """Axis-angle (3,) representing the rotation from q_cur to q_des."""
-    import torch
-    q_err = _quat_mul(q_des, _quat_conj(q_cur))
-    # Shortest-path: flip if w < 0
-    if q_err[..., 0].item() < 0:
-        q_err = -q_err
-    w = q_err[..., 0].clamp(-1.0, 1.0)
-    angle = 2.0 * torch.acos(w)
-    sin_half = torch.sqrt((1.0 - w * w).clamp(min=1e-8))
-    axis = q_err[..., 1:] / sin_half
-    return axis * angle
+from envs.quat_utils import quat_err_axis_angle
 
 
 # ----- Named pick/place locations (world frame) -----
@@ -131,7 +116,10 @@ PLACE_Z         = 0.18
 GRIP_BIAS_Y = 0.018
 
 
-def script_trajectory_waypoints(cube_pos_w: "torch.Tensor") -> list[dict]:
+def script_trajectory_waypoints(
+    cube_pos_w: "torch.Tensor",
+    cube_yaw: float = 0.0,
+) -> list[dict]:
     """Generate the scripted pick-and-place trajectory.
 
     Waypoints are consumed by an interpolating controller that ramps the EE
@@ -140,6 +128,12 @@ def script_trajectory_waypoints(cube_pos_w: "torch.Tensor") -> list[dict]:
     snaps. `track` controls whether pick_xy is updated from the live cube
     pose during that phase (needed for approach/descent alignment, MUST be
     False once the gripper has contacted the cube).
+
+    `cube_yaw` (rad about world Z) is the cube's orientation at episode start.
+    The grip-bias offset is rotated into world frame using cube_yaw so the
+    EE always lines up along the gripper's local Y axis, no matter how the
+    cube is rotated. The caller is responsible for building `q_target` from
+    the same yaw so the gripper rotates to match the cube before descent.
 
     Phases (total ~910 @ 30 Hz ≈ 30 s per demo):
       A  approach+reorient    70  TRACK   above cube, rotate to top-down
@@ -161,38 +155,46 @@ def script_trajectory_waypoints(cube_pos_w: "torch.Tensor") -> list[dict]:
     to give the policy a longer grasp-commit window (Hole C — close transition
     being statistically invisible in loss). See reports/recovery_plan_2026-04-24.md.
     """
+    import math
     import torch
     cx, cy, _ = cube_pos_w.tolist()
     tx, ty = PLACE_XY
 
-    # Bias-compensated grasp Y (see GRIP_BIAS_Y comment).
-    gy = cy + GRIP_BIAS_Y
+    # Rotate the GRIP_BIAS_Y offset (originally in tool0's local Y) into world
+    # frame using the cube's yaw. tool0's local Y axis after a yaw rotation
+    # about world Z is (-sin(yaw), cos(yaw), 0).
+    bias_x = -math.sin(cube_yaw) * GRIP_BIAS_Y
+    bias_y = math.cos(cube_yaw) * GRIP_BIAS_Y
+    gx = cx + bias_x
+    gy = cy + bias_y
 
     # BinaryJointPositionAction: actions < 0 => CLOSE, >= 0 => OPEN. So
     # gripper = +1.0 is OPEN, -1.0 is CLOSE.
     return [
         # A: rise/rotate to top-down above cube.
-        {"ee_pos": torch.tensor([cx, gy, PICK_APPROACH_Z]), "gripper": +1.0, "steps": 70,  "track": True},
+        {"ee_pos": torch.tensor([gx, gy, PICK_APPROACH_Z]), "gripper": +1.0, "steps": 70,  "track": True},
         # B: hover-settle above cube (bias-compensated).
-        {"ee_pos": torch.tensor([cx, gy, PICK_APPROACH_Z]), "gripper": +1.0, "steps": 15,  "track": True},
+        {"ee_pos": torch.tensor([gx, gy, PICK_APPROACH_Z]), "gripper": +1.0, "steps": 15,  "track": True},
         # C: slow pure-vertical descent to bias-compensated grasp.
-        {"ee_pos": torch.tensor([cx, gy, PICK_GRASP_Z]),    "gripper": +1.0, "steps": 100, "track": True},
+        {"ee_pos": torch.tensor([gx, gy, PICK_GRASP_Z]),    "gripper": +1.0, "steps": 100, "track": True},
         # D: settle with pads straddling the cube. Tracking OFF — freezes
         #    the EE so the cube can rest, and we commit to grasp xy now.
-        {"ee_pos": torch.tensor([cx, gy, PICK_GRASP_Z]),    "gripper": +1.0, "steps": 30,  "track": False},
+        {"ee_pos": torch.tensor([gx, gy, PICK_GRASP_Z]),    "gripper": +1.0, "steps": 30,  "track": False},
         # E: close gripper in place. Tracking OFF — if the close nudges the
         #    cube, we do NOT chase it (chasing was the old feedback loop).
-        {"ee_pos": torch.tensor([cx, gy, PICK_GRASP_Z]),    "gripper": -1.0, "steps": 120, "track": False},
+        {"ee_pos": torch.tensor([gx, gy, PICK_GRASP_Z]),    "gripper": -1.0, "steps": 120, "track": False},
         # F: lift straight up to LIFT_Z. Tracking OFF.
-        {"ee_pos": torch.tensor([cx, gy, LIFT_Z]),          "gripper": -1.0, "steps": 90,  "track": False},
+        {"ee_pos": torch.tensor([gx, gy, LIFT_Z]),          "gripper": -1.0, "steps": 90,  "track": False},
         # G1-G3: transport split into three short segments. A single Cartesian
         #    line from (pick, 0.40) to (place, 0.40) pushes the HC10DT through
         #    an IK singularity mid-swing — observed EE jumping 45 cm backward
         #    in one decile even at LIFT_Z=0.40. Broken into 3 short legs the
         #    diff-IK controller stays in the same joint branch the whole way.
-        {"ee_pos": torch.tensor([cx + (tx - cx) * 0.33, cy + (ty - cy) * 0.33 + GRIP_BIAS_Y, LIFT_Z]),
+        # Bias is in the gripper local Y; once we're transporting the cube
+        # the bias is "frozen in" to the trajectory so it doesn't snap.
+        {"ee_pos": torch.tensor([gx + (tx - cx) * 0.33, gy + (ty - cy) * 0.33, LIFT_Z]),
          "gripper": -1.0, "steps": 100, "track": False},
-        {"ee_pos": torch.tensor([cx + (tx - cx) * 0.66, cy + (ty - cy) * 0.66 + GRIP_BIAS_Y, LIFT_Z]),
+        {"ee_pos": torch.tensor([gx + (tx - cx) * 0.66, gy + (ty - cy) * 0.66, LIFT_Z]),
          "gripper": -1.0, "steps": 100, "track": False},
         {"ee_pos": torch.tensor([tx, ty, LIFT_Z]),          "gripper": -1.0, "steps": 100, "track": False},
         # H: settle above the output location before descending.
@@ -224,7 +226,14 @@ def main() -> int:
     dataset_path = pathlib.Path(args_cli.dataset_file)
     dataset_path.parent.mkdir(parents=True, exist_ok=True)
     if dataset_path.exists():
+        if not args_cli.overwrite:
+            _log(f"ERROR: {dataset_path} already exists. Pass --overwrite to "
+                 "delete it, or point --dataset_file at a fresh path.")
+            return 2
+        _log(f"--overwrite given; removing existing {dataset_path}")
         dataset_path.unlink()
+
+    strict = not args_cli.no_strict
 
     env_cfg = parse_env_cfg(TASK, device="cuda:0", num_envs=1)
     env_cfg.recorders = ActionStateRecorderManagerCfg()
@@ -244,20 +253,85 @@ def main() -> int:
         except Exception:
             pass
 
-    demo_target = args_cli.num_demos
+    # If --cube_xy is supplied, force each position once (no retries, every
+    # position attempted exactly once). Otherwise fall back to random sampling
+    # with the original 3x retry budget.
+    forced_positions: list[tuple[float, float]] | None = None
+    if args_cli.cube_xy:
+        forced_positions = [
+            tuple(float(v) for v in s.split(",")) for s in args_cli.cube_xy
+        ]
+        demo_target = len(forced_positions)
+        iteration_plan: list[tuple[float, float] | None] = list(forced_positions)
+    else:
+        demo_target = args_cli.num_demos
+        iteration_plan = [None] * (demo_target * 3)
+
     successful = 0
     attempted = 0
+    per_position_outcomes: list[tuple[tuple[float, float] | None, bool, int]] = []
 
-    while successful < demo_target and attempted < demo_target * 3:
+    for forced_xy in iteration_plan:
+        # Random mode: stop once we have enough successes. Forced mode: always
+        # exhaust every position so the per-corner pass/fail report is complete.
+        if forced_positions is None and successful >= demo_target:
+            break
         attempted += 1
-        _log(f"attempt {attempted}: successes so far {successful}/{demo_target}")
+        tag = (
+            f"forced=({forced_xy[0]:+.3f},{forced_xy[1]:+.3f})"
+            if forced_xy is not None else "random"
+        )
+        _log(f"attempt {attempted} [{tag}]: successes so far {successful}/{demo_target}")
         obs, _ = env.reset()
 
-        # Read privileged cube pose (initial position, used for transport target).
-        cube_pos = obs["policy"]["cube_pos"][0].clone()  # (3,)
-        _log(f"  cube at ({cube_pos[0]:.3f}, {cube_pos[1]:.3f}, {cube_pos[2]:.3f})")
+        # Force cube to override XY (yaw = 0) before the trajectory begins.
+        if forced_xy is not None:
+            cube_rb = env.unwrapped.scene["cube"]
+            sim_dev = env.unwrapped.sim.device
+            origin = env.unwrapped.scene.env_origins[0]
+            fx, fy = forced_xy
+            pose = torch.tensor([[
+                fx + origin[0].item(),
+                fy + origin[1].item(),
+                0.025 + origin[2].item(),
+                1.0, 0.0, 0.0, 0.0,
+            ]], device=sim_dev)
+            cube_rb.write_root_pose_to_sim(pose)
+            cube_rb.write_root_velocity_to_sim(torch.zeros((1, 6), device=sim_dev))
+            env.unwrapped.scene.write_data_to_sim()
+            # Step once with a zero action so the policy obs picks up the new
+            # cube pose before the controller reads cube_pos below.
+            zero_act = torch.zeros(
+                (1, env.action_space.shape[-1]), device=sim_dev
+            )
+            obs, _, _, _, _ = env.step(zero_act)
 
-        waypoints = script_trajectory_waypoints(cube_pos)
+        # Read privileged cube pose (initial position + yaw, used for grasp
+        # alignment). The cube observation only includes XYZ; pull the
+        # quaternion straight from the rigid-body asset. Yaw randomization
+        # in env config rotates only about world Z, so the cube quat is a
+        # pure-Z rotation: (cos(yaw/2), 0, 0, sin(yaw/2)) → yaw = 2*atan2(z, w).
+        import math
+        cube_pos = obs["policy"]["cube_pos"][0].clone()  # (3,)
+        cube_quat = env.unwrapped.scene["cube"].data.root_quat_w[0]  # (w,x,y,z)
+        cube_yaw = 2.0 * math.atan2(float(cube_quat[3]), float(cube_quat[0]))
+        # The cube is 4-fold symmetric about Z, so any equivalent yaw mod π/2
+        # is fine. Wrap into [-π/4, π/4) to keep the gripper inside its
+        # comfortable rotation range and out of IK-singularity territory.
+        while cube_yaw > math.pi / 4:
+            cube_yaw -= math.pi / 2
+        while cube_yaw < -math.pi / 4:
+            cube_yaw += math.pi / 2
+        ep_color = (getattr(env.unwrapped, "cube_color_state", {}) or {}).get(0, ("", -1))
+        _log(f"  cube at ({cube_pos[0]:.3f}, {cube_pos[1]:.3f}, {cube_pos[2]:.3f}) "
+             f"yaw={cube_yaw:.3f}rad color={ep_color[0]!r}")
+
+        waypoints = script_trajectory_waypoints(cube_pos, cube_yaw=cube_yaw)
+        # Cache the rotated grip-bias for use inside the per-step tracking
+        # loop below (track=True phases re-read live cube XY but want the
+        # same yaw-rotated bias).
+        bias_x = -math.sin(cube_yaw) * GRIP_BIAS_Y
+        bias_y = math.cos(cube_yaw) * GRIP_BIAS_Y
         # Each waypoint owns its own `track` flag (see script_trajectory_waypoints
         # docstring). Approach/hover/descent track the live cube XY so the gripper
         # aligns on the cube's actual position; settle/close/lift/transport/hold
@@ -265,16 +339,16 @@ def main() -> int:
         # pose, because per-step tracking during close created a feedback loop
         # where a cube-kick would swing the EE, which would kick the cube further.
 
-        # Target orientation: tool0 +Z pointing in world -Z (gripper fingers down).
-        # Built as the Hamilton product qz(yaw=0) * qx(π) → (0, 1, 0, 0) in (w,x,y,z).
-        # This is the canonical top-down pose used by kitting_ws for HC10DT picks.
-        q_target = _quat_from_downward_xy_yaw(0.0).to("cuda:0")
+        # Target orientation: tool0 +Z pointing in world -Z (gripper fingers
+        # down) AND rotated by cube_yaw about world Z so the pads align with
+        # one of the cube's faces. Built as qz(cube_yaw) * qx(π).
+        q_target = _quat_from_downward_xy_yaw(cube_yaw).to("cuda:0")
 
         # Starting EE pose for diagnostics — report orientation error up-front so
         # you can see how far the arm has to rotate to reach top-down.
         start_ee = obs["policy"]["ee_pose"][0]
         start_ang_err = float(torch.linalg.vector_norm(
-            _quat_err_axis_angle(start_ee[3:7], q_target)
+            quat_err_axis_angle(start_ee[3:7], q_target)
         ))
         _log(f"  start EE pos: ({start_ee[0]:.3f}, {start_ee[1]:.3f}, {start_ee[2]:.3f}) "
              f"top-down ang_err={start_ang_err:.2f}rad")
@@ -295,12 +369,13 @@ def main() -> int:
             phase_start_pos = obs["policy"]["ee_pose"][0, :3].clone()
 
             # If tracking, re-read cube XY once at phase start (per-step update
-            # happens in the inner loop). Apply the grip-bias Y compensation
-            # so the EE lines up for a symmetric close.
+            # happens in the inner loop). Apply the yaw-rotated grip-bias so
+            # the EE lines up for a symmetric close along the gripper's
+            # local Y axis (which is rotated by cube_yaw about world Z).
             if track:
                 live_cube = obs["policy"]["cube_pos"][0]
-                phase_end_pos[0] = live_cube[0]
-                phase_end_pos[1] = live_cube[1] + GRIP_BIAS_Y
+                phase_end_pos[0] = live_cube[0] + bias_x
+                phase_end_pos[1] = live_cube[1] + bias_y
 
             phase_start_ee = obs["policy"]["ee_pose"][0]
             # Diagnostics on the RIA 2F-85 — finger_joint angle, and world-Z
@@ -331,11 +406,12 @@ def main() -> int:
                 # Per-step cube tracking (approach/descent only): live-update
                 # the phase endpoint XY so the descending gripper follows any
                 # cube nudge. Disabled for settle/close/lift/transport (once
-                # pads are committed around the cube).
+                # pads are committed around the cube). Uses the yaw-rotated
+                # grip-bias so the offset stays along the gripper's local Y.
                 if track:
                     live_cube = obs["policy"]["cube_pos"][0]
-                    phase_end_pos[0] = live_cube[0]
-                    phase_end_pos[1] = live_cube[1] + GRIP_BIAS_Y
+                    phase_end_pos[0] = live_cube[0] + bias_x
+                    phase_end_pos[1] = live_cube[1] + bias_y
 
                 # Smoothstep interpolation of the target across the phase:
                 # u = 3t² − 2t³, yielding zero velocity at both endpoints.
@@ -367,7 +443,7 @@ def main() -> int:
                 # delta and premultiplies: q_new = q_delta * q_cur. So the correct
                 # command is axis_angle(q_target * q_cur^-1). Previously this was
                 # hard-zeroed, which is why the arm approached at its ~45° home tilt.
-                rot_err = _quat_err_axis_angle(cur_quat, q_target)
+                rot_err = quat_err_axis_angle(cur_quat, q_target)
                 rot_delta = torch.clamp(rot_err * 3.0, -1.0, 1.0)
 
                 action = torch.zeros((1, 7), device="cuda:0")
@@ -401,11 +477,20 @@ def main() -> int:
                          f"cube ({cube_now[0]:.3f},{cube_now[1]:.3f},{cube_now[2]:.3f}) "
                          f"finger_q={finger_q:.2f}")
 
-                # Track success (same logic as record_demos.py's process_success_condition)
+                # Track success (same logic as record_demos.py's process_success_condition).
+                # In strict mode (default) any failure in the success term re-raises so
+                # we don't silently train on `terminated[0]` while the real metric is
+                # broken. Pass --no_strict to restore the soft-fail behaviour.
                 if success_term is not None:
                     try:
                         is_success = bool(success_term.func(env.unwrapped, **success_term.params)[0])
-                    except Exception:
+                    except Exception as e:
+                        if strict:
+                            _log(f"  ERROR: success_term raised {type(e).__name__}: {e}; "
+                                 "aborting (pass --no_strict to suppress)")
+                            raise
+                        _log(f"  WARN: success_term raised {type(e).__name__}: {e}; "
+                             "falling back to terminated[0]")
                         is_success = bool(terminated[0])
                 else:
                     is_success = bool(terminated[0])
@@ -425,19 +510,83 @@ def main() -> int:
                 break
 
         _log(f"  phases done in {total_steps} steps, success={success_reached}")
+        per_position_outcomes.append((forced_xy, success_reached, total_steps))
 
         # Record via recorder manager
         if success_reached:
+            # The env auto-resets on termination INSIDE env.step(), so by the
+            # time we get here `env.cube_color_state[0]` is the NEXT episode's
+            # color — we have to use the snapshot captured at this episode's
+            # reset (`ep_color`, line 289) for the demo we're about to export.
+            ep_color_name, ep_color_idx = ep_color
             env.unwrapped.recorder_manager.record_pre_reset([0], force_export_or_skip=False)
             env.unwrapped.recorder_manager.set_success_to_episodes(
                 [0], torch.tensor([[True]], dtype=torch.bool, device=env.unwrapped.device)
             )
             env.unwrapped.recorder_manager.export_episodes([0])
             successful += 1
+            # Stamp per-episode color metadata on the HDF5 demo group so the
+            # LeRobot converter can emit a per-episode prompt string. The
+            # recorder writes placeholder demo_K entries (num_samples=0) for
+            # post-reset stubs interleaved with the real demos, so
+            # `demo_{successful - 1}` does NOT generally point at the latest
+            # real demo. Find the highest-numbered demo with num_samples > 0
+            # and no "task" attr already stamped, and stamp that.
+            try:
+                import h5py
+                from envs.mdp.cube_palette import format_task_with_color
+                with h5py.File(str(dataset_path), "a") as fh:
+                    if "data" in fh:
+                        keys = sorted(
+                            fh["data"].keys(),
+                            key=lambda k: int(k.split("_")[1]),
+                        )
+                        target_key = None
+                        for k in reversed(keys):
+                            d = fh["data"][k]
+                            if int(d.attrs.get("num_samples", 0)) <= 0:
+                                continue
+                            if "task" in d.attrs:
+                                continue
+                            target_key = k
+                            break
+                        if target_key is not None:
+                            d = fh["data"][target_key]
+                            if ep_color_name:
+                                d.attrs["cube_color"] = ep_color_name
+                                d.attrs["cube_color_idx"] = int(ep_color_idx)
+                            d.attrs["task"] = format_task_with_color(ep_color_name)
+                        else:
+                            msg = "no eligible demo group found for color stamp"
+                            if strict:
+                                _log(f"  ERROR: {msg}; aborting (pass --no_strict to suppress)")
+                                raise RuntimeError(msg)
+                            _log(f"  WARN: {msg}")
+            except Exception as e:
+                # The downstream LeRobot converter relies on per-episode `task`
+                # attrs to emit colour-aware prompts; a silent failure here
+                # silently trains the policy on placeholder prompts. Strict
+                # mode (default) re-raises so the dataset isn't half-stamped.
+                if strict:
+                    _log(f"  ERROR: failed to stamp color attrs ({type(e).__name__}: {e}); "
+                         "aborting (pass --no_strict to suppress)")
+                    raise
+                _log(f"  WARN: failed to stamp color attrs: {e}")
 
         env.unwrapped.recorder_manager.reset()
 
     _log(f"total: {successful}/{demo_target} successful demos in {attempted} attempts")
+
+    if forced_positions is not None:
+        _log("=" * 70)
+        _log("Per-position sanity check results:")
+        _log(f"  {'#':>3}  {'cube_xy':>20}  {'success':>8}  {'steps':>6}")
+        for i, (xy, ok_i, n) in enumerate(per_position_outcomes):
+            xy_str = f"({xy[0]:+.3f}, {xy[1]:+.3f})" if xy is not None else "random"
+            _log(f"  {i:>3}  {xy_str:>20}  {str(ok_i):>8}  {n:>6}")
+        _log(f"Forced-position summary: "
+             f"{successful}/{len(per_position_outcomes)} succeeded")
+        _log("=" * 70)
 
     env.close()
     sim_app.close()

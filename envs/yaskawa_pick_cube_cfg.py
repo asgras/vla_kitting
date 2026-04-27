@@ -20,7 +20,7 @@ from isaaclab.sensors import CameraCfg
 from isaaclab.sim import GroundPlaneCfg
 from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg
 from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
-from isaaclab.sim.spawners.shapes.shapes_cfg import CuboidCfg
+from isaaclab.sim.spawners.shapes.shapes_cfg import CuboidCfg, CylinderCfg
 from isaaclab.sim.spawners.materials import PreviewSurfaceCfg
 import isaaclab.sim as sim_utils
 from isaaclab.utils import configclass
@@ -46,32 +46,46 @@ class PickCubeSceneCfg(InteractiveSceneCfg):
     # HC10DT + Robotiq
     robot = HC10DT_ROBOTIQ_CFG.copy()
 
-    # Table: 1.2 x 0.8 x 0.04 box centered at (0.6, 0, -0.02)
+    # Table: 1.5 x 1.0 x 0.04 box centered at (0.6, 0, -0.02). Widened from
+    # 1.2 x 0.8 (vla_kitting-8tf) so the widened cube box (cube X ∈
+    # [0.40, 0.70], Y ∈ [-0.22, 0.22]) plus the 10 cm magenta target circle at
+    # (0.65, 0.20) plus a 5 cm safety margin all fit clearly within the table
+    # surface. Resulting table X spans [-0.15, 1.35], Y spans [-0.50, 0.50].
     table = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Table",
         init_state=AssetBaseCfg.InitialStateCfg(pos=(0.6, 0.0, -0.02)),
         spawn=CuboidCfg(
-            size=(1.2, 0.8, 0.04),
+            size=(1.5, 1.0, 0.04),
             visual_material=PreviewSurfaceCfg(diffuse_color=(0.35, 0.25, 0.18)),
             collision_props=sim_utils.CollisionPropertiesCfg(),
         ),
     )
 
-    # Target marker: bright-green 10×10 cm square placed flush with the table
-    # surface at PLACE_XY=(0.65, 0.20). Visual-only (no collision, no rigid
-    # body) so the cube rests directly on the table without climbing the mat.
-    # The VLA needs this pixel cue to ground "the output location" — without
-    # it the policy would have to memorize world coordinates.
-    # Target marker: 20×20 cm, 1 cm thick, pure magenta. Magenta is the one
-    # color empirically confirmed to render correctly on this static asset
-    # path (green/cyan/emissive variants rendered in the cube's color due to
-    # scene-replication material sharing). Outside the cube-color palette,
-    # so the VLA can unambiguously ground "place it on the target".
+    # Target marker: 10 cm diameter, 1 cm thick magenta cylinder (a flat disk)
+    # placed flush with the table surface at PLACE_XY=(0.65, 0.20). Visual-
+    # only (no collision, no rigid body) so the cube rests directly on the
+    # table without climbing the mat. The VLA needs this pixel cue to
+    # ground "the output location" — without it the policy would have to
+    # memorize world coordinates.
+    #
+    # Was a 20×20 cm magenta square (CuboidCfg). Swapped to a 10 cm circle
+    # (vla_kitting-usq) so the marker is (a) more salient as a grounding
+    # cue, (b) tighter precision target for the place phase, and (c) a
+    # different visual signature that breaks any patch-aligned attention
+    # bias the prior square may have introduced.
+    #
+    # Magenta retained — it's the one color empirically confirmed to render
+    # correctly on this static asset path (green/cyan/emissive variants
+    # rendered in the cube's color due to scene-replication material
+    # sharing). Outside the cube-color palette, so the VLA can
+    # unambiguously ground "place it on the magenta circle".
     target_marker = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/TargetMarker",
         init_state=AssetBaseCfg.InitialStateCfg(pos=(0.65, 0.20, 0.005)),
-        spawn=CuboidCfg(
-            size=(0.20, 0.20, 0.010),
+        spawn=CylinderCfg(
+            radius=0.05,
+            height=0.010,
+            axis="Z",
             visual_material=PreviewSurfaceCfg(
                 diffuse_color=(1.0, 0.0, 1.0),
             ),
@@ -94,8 +108,12 @@ class PickCubeSceneCfg(InteractiveSceneCfg):
     wrist_cam = CameraCfg(
         prim_path="{ENV_REGEX_NS}/Robot/root_joint/tool0/wrist_cam",
         update_period=0.0,
-        height=128,
-        width=128,
+        # 128 -> 256: SmolVLA pads inputs to 512x512 internally, so 256 native
+        # pixels means a single 2x upsample instead of 4x. The cube at grasp
+        # distance (~5-15 cm from the lens) was 30-50 px wide at 128 — fine
+        # for "is there a cube" but lossy for finger-cube alignment cues.
+        height=256,
+        width=256,
         data_types=["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
             focal_length=12.0, focus_distance=400.0, horizontal_aperture=20.955,
@@ -108,24 +126,34 @@ class PickCubeSceneCfg(InteractiveSceneCfg):
         ),
     )
 
-    # Third-person overhead camera fixed in the env. Re-aimed at the workspace
-    # center (0.60, 0.10, 0.02) from (1.15, 0.1, 0.5) — the prior pose at
-    # (1.3, 0, 1.0) with a shallow 30° tilt overshot the table by ~45 cm and
-    # centered on the robot body. Rotation computed by /tmp/cam_lookat.py so
-    # the target marker at (0.65, 0.20) sits squarely in-frame.
+    # Third-person overhead camera fixed in the env. Re-positioned 2026-04-27
+    # to cover the entire spawn box + target marker without cropping. The
+    # prior pose at (1.15, 0.10, 0.50) with focal_length=24 (FOV ~47°) cropped
+    # the cube on 3 of 5 random poses (samples in
+    # reports/camera_samples/2026-04-27_current_scene). New aim point is the
+    # centroid of [spawn box ∪ target] = (0.55, -0.10, 0.025); camera pulled
+    # back to (1.5, -0.10, 0.80) and widened to focal_length=18 (FOV ~60°).
+    # Coverage on the table plane: X ∈ [-3.4, 1.21] (well past spawn X[0.25,0.85])
+    # and Y ∈ [-0.82, 0.62] at workspace depth (well past spawn Y[-0.40,0.00]
+    # and target Y=0.20). Quaternion computed via /tmp/cam_lookat.py with
+    # world_up=+Z so image "up" points away from the robot base.
     third_person_cam = CameraCfg(
         prim_path="{ENV_REGEX_NS}/third_person_cam",
         update_period=0.0,
-        height=256,
-        width=256,
+        # 256 -> 512: matches SmolVLA's resize_imgs_with_padding=(512,512), so
+        # the policy sees native pixels with no upscaling at all. The cube at
+        # ~1.2 m from the camera was ~6-12 px across at 256 — borderline
+        # for color reading, marginal for shape.
+        height=512,
+        width=512,
         data_types=["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
-            focal_length=24.0, focus_distance=400.0, horizontal_aperture=20.955,
+            focal_length=18.0, focus_distance=400.0, horizontal_aperture=20.955,
             clipping_range=(0.1, 5.0),
         ),
         offset=CameraCfg.OffsetCfg(
-            pos=(1.15, 0.10, 0.50),
-            rot=(-0.2926, 0.64373, 0.64373, -0.2926),
+            pos=(1.5, -0.10, 0.80),
+            rot=(-0.30326, 0.63877, 0.63877, -0.30326),
             convention="ros",
         ),
     )
@@ -133,7 +161,7 @@ class PickCubeSceneCfg(InteractiveSceneCfg):
     # The cube to pick
     cube = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Cube",
-        init_state=RigidObjectCfg.InitialStateCfg(pos=(0.55, 0.0, 0.025), rot=(1.0, 0.0, 0.0, 0.0)),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(0.55, -0.20, 0.025), rot=(1.0, 0.0, 0.0, 0.0)),
         spawn=CuboidCfg(
             size=(0.05, 0.05, 0.05),
             rigid_props=RigidBodyPropertiesCfg(
@@ -212,6 +240,11 @@ class ObservationsCfg:
         ee_pose = ObsTerm(func=mdp.ee_pose_world)
         gripper_closed = ObsTerm(func=mdp.gripper_is_closed)
         cube_pos = ObsTerm(func=mdp.cube_position_in_world_frame)
+        # Static-per-episode palette index, set at reset by
+        # randomize_cube_color. Lets the recorder + LeRobot converter +
+        # closed-loop eval all derive the per-episode color word from
+        # one source of truth (envs.mdp.cube_palette).
+        cube_color_idx = ObsTerm(func=mdp.cube_color_idx)
         actions = ObsTerm(func=mdp.last_action)
         wrist_cam = ObsTerm(
             func=mdp.image,
@@ -237,23 +270,27 @@ class EventCfg:
         mode="reset",
     )
 
-    # Cube default spawn at (0.55, 0, 0.025). reset_root_state_uniform samples
-    # a DELTA from this default within the ranges below. Significantly widened
-    # for the vision_grounded_wide_15hz run (2026-04-24): X window doubled,
-    # Y window ~2.15× to force visual grounding across most of the table.
-    # Yaw kept at 0 per user direction — avoids the 50 mm cube diagonal
-    # clipping the 2F-85 finger knuckles and keeps the scripted controller
-    # simple. If Phase 1 open-loop scripted success on the widened box is
-    # below gate G1 (28/30), tighten these bounds before running Mimic.
+    # Cube default spawn at (0.55, -0.20, 0.025). reset_root_state_uniform
+    # samples a DELTA from this default within the ranges below.
+    # Region rotated 90° (long axis along X) and shifted toward the -Y table
+    # edge so the spawn rectangle no longer overlaps the (0.65, 0.20) target
+    # disk. Resulting absolute spawn box: X ∈ [0.25, 0.85], Y ∈ [-0.40, 0.00],
+    # 0.10 m clear of the -Y table edge (table Y ∈ [-0.50, 0.50]) and 0.12 m
+    # clear of the 8 cm target tolerance circle.
+    # Yaw remains ±0.5 rad — the scripted controller in
+    # scripts/validate/scripted_pick_demo.py reads the cube quat at episode
+    # start and rotates both the gripper target orientation and the
+    # GRIP_BIAS_Y offset into world frame. The 50 mm cube diagonal across
+    # ±0.5 rad stays inside the 85 mm 2F-85 open span.
     randomize_cube_pose = EventTerm(
         func=mdp.reset_root_state_uniform,
         mode="reset",
         params={
             "pose_range": {
-                "x": (-0.15, 0.15),   # sampled cube X ∈ [0.40, 0.70]
-                "y": (-0.22, 0.22),   # sampled cube Y ∈ [-0.22, 0.22]
+                "x": (-0.30, 0.30),   # sampled cube X ∈ [0.25, 0.85]
+                "y": (-0.20, 0.20),   # sampled cube Y ∈ [-0.40, 0.00]
                 "z": (0.0, 0.0),
-                "yaw": (0.0, 0.0),
+                "yaw": (-0.5, 0.5),   # cube yaw ∈ [-0.5, 0.5] rad
             },
             "velocity_range": {},
             "asset_cfg": SceneEntityCfg("cube"),
@@ -313,8 +350,25 @@ class YaskawaPickCubeIkRelEnvCfg(ManagerBasedRLEnvCfg):
         # by symlinking the extension's warp subdir to the newer pip warp (1.12.1)
         # at /opt/IsaacSim/extscache/omni.warp.core-1.7.1+lx64/warp. Backup at warp.bak.
         self.sim.use_fabric = True
+        # DLSS is the IsaacLab default antialiasing_mode. It reconstructs each
+        # frame from a lower-resolution input plus motion vectors and a
+        # multi-frame history. When the cube teleports during reset
+        # (write_root_pose_to_sim), DLSS has no motion vector for the
+        # instantaneous jump, so prior-frame samples of the cube at its
+        # previous spawn pose bleed into the new frame as faint "ghost cubes."
+        # That ghost trail was visible in cam_check/sample_*.png on
+        # 2026-04-25 — multiple cube-shaped objects per frame, with the
+        # current-reset cube the brightest and stale-reset cubes fading. The
+        # eval policy was therefore being fed images with phantom cubes the
+        # training distribution (recorded HDF5) never contains, plausibly the
+        # cause of the v3/v3.1/v3.2 visual mode collapse. FXAA is non-temporal
+        # so no history bleeds across resets. Off would also work but loses
+        # all anti-aliasing on cube/gripper edges. See
+        # reports/2026-04-26_eval_ghost_cube_investigation.md for the
+        # diagnosis.
+        self.sim.render.antialiasing_mode = "FXAA"
         self.viewer.eye = (1.5, 1.0, 1.2)
-        self.viewer.lookat = (0.55, 0.0, 0.05)
+        self.viewer.lookat = (0.55, -0.20, 0.05)
 
         # Keyboard teleop. pos/rot_sensitivity are the per-press delta that multiplies
         # the IK action scale (0.1) each control step. 0.3 * 0.1 = 3 cm of commanded

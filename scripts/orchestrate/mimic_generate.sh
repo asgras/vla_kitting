@@ -237,7 +237,7 @@ phase_convert() {
     "$REPO"/scripts/data/isaaclab_to_lerobot.py \
     --input "$MASTER" --output "$dst" \
     --repo_id vla_kitting/cube_pick_v1 \
-    --task "pick up the cube and place it on the pink square" \
+    --task "pick up the cube and place it on the magenta circle" \
     --fps 15 --stride 1 --drop_cube_pos \
     2>&1 | tee -a "$MIMIC_LOG" | tail -10
 

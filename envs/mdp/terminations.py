@@ -16,7 +16,7 @@ def cube_lifted_over_target(
     env: "ManagerBasedRLEnv",
     min_height: float = 0.10,
     target_xy: tuple[float, float] = (0.65, 0.20),
-    xy_tolerance: float = 0.08,
+    xy_tolerance: float = 0.075,
     object_cfg: SceneEntityCfg = SceneEntityCfg("cube"),
 ) -> torch.Tensor:
     """Success when cube is > min_height above the table (z=0 plane) AND within xy_tolerance of target."""
@@ -35,7 +35,7 @@ def cube_lifted_over_target(
 def cube_placed_at_target(
     env: "ManagerBasedRLEnv",
     target_xy: tuple[float, float] = (0.65, 0.20),
-    xy_tolerance: float = 0.08,
+    xy_tolerance: float = 0.075,
     max_resting_height: float = 0.03,
     max_speed: float = 0.1,
     object_cfg: SceneEntityCfg = SceneEntityCfg("cube"),
@@ -47,6 +47,13 @@ def cube_placed_at_target(
     there the pad sits at z≈0.04 and the cube center at z≈0.034, so a 0.05
     threshold would fire before the gripper has actually released. This way
     success only fires after the fingers open and the cube settles.
+
+    xy_tolerance was 0.08 against the 20×20 cm magenta square (then visibly
+    inside the marker). Tightened to 0.075 (= disk radius 0.05 + cube
+    half-width 0.025) on 2026-04-27 to match the 10 cm magenta cylinder
+    target so a "success" corresponds to "any part of the cube is on the
+    disk" — the natural geometric reading of "placed on the disk" for a
+    cube on a circle. See vla_kitting-mil and reports/2026-04-26_scene_data_integrity_pack.md.
     """
     cube: RigidObject = env.scene[object_cfg.name]
     # Env-local cube pos so target_xy is per-env (see note in cube_lifted_over_target).

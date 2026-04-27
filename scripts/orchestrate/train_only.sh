@@ -20,16 +20,16 @@
 # Environment knobs:
 #   TRAIN_STEPS          steps per epoch call            (default 1000)
 #   TRAIN_SAVE_FREQ      save_freq within each call      (default =TRAIN_STEPS)
-#   TRAIN_BATCH          batch size                      (default 4)
-#   TRAIN_LR             constant learning rate          (default 1e-4)
+#   TRAIN_BATCH          batch size                      (default 16)
+#   TRAIN_LR             constant learning rate          (default 1e-3)
 #   EVAL_EPISODES        rollouts per eval               (default 10)
 #   EVAL_EVERY_N         eval every N epochs             (default 10)
 #   USE_LORA             1/0 for LoRA                    (default 1)
-#   LORA_R               LoRA rank                       (default 32)
-#   LORA_ALPHA           LoRA alpha (scaling)            (default 32)
+#   LORA_R               LoRA rank                       (default 64)
+#   LORA_ALPHA           LoRA alpha (scaling)            (default 64)
 #   LORA_DROPOUT         LoRA dropout                    (default 0.05)
-#   LORA_TARGETS_REGEX   regex of module names to adapt  (default: q,k,v,o + gate,up,down in lm_expert)
-#   N_ACTION_STEPS       action-chunk steps executed     (default 12)
+#   LORA_TARGETS_REGEX   regex of module names to adapt  (default: q,k,v,o + gate,up,down in lm_expert + action projections; vision tower NOT included)
+#   N_ACTION_STEPS       action-chunk steps executed     (default 10)
 
 set -euo pipefail
 export LC_ALL=C.UTF-8
@@ -255,10 +255,29 @@ while true; do
         # broader community consensus that over-promoting modules_to_save
         # shrinks the LoRA regularization benefit.
         --peft.full_training_modules='[action_out_proj]'
+        # v4 (2026-04-26): per-dim action loss weight on action[6] (gripper).
+        # v3/v3.1/v3.2 ran "canonical uniform MSE" (recovery plan §3 Hole B
+        # ablation-add-back) and produced policies that bulldoze the cube
+        # without ever closing the gripper. The gripper is +1.0 for ~30% of
+        # demo frames then -1.0, with the transition localized to ~1 step;
+        # under flat L2 across 7 dims, regressing the gripper to ~+0.9
+        # throughout is near-optimal-lazy. Weight 8.0 is the recovery plan's
+        # "strong but not dominant" recommendation. The lerobot patch wiring
+        # this through is documented in
+        # project_lerobot_peft_resume_patch.md; field name confirmed at
+        # lerobot/policies/smolvla/configuration_smolvla.py:113.
+        # Length must match max_action_dim (32 in SmolVLA flow matching),
+        # NOT the env's action_dim (7). First 6 entries cover pose deltas,
+        # entry 7 is gripper (×16 — bumped from 8 mid-run on 2026-04-26
+        # when v4-w8 hit 0/N real successes through epoch 20 with loss
+        # plateaued at 0.031 and dz=0 across all eval episodes; gripper
+        # was clearly not being learned), entries 8-32 are padding dims
+        # masked out via action_padding_mask (weight value doesn't matter).
+        --policy.action_loss_dim_weights='[1.0,1.0,1.0,1.0,1.0,1.0,16.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0]'
       )
       _log "fresh start from lerobot/smolvla_base + LoRA r=$LORA_R alpha=$LORA_ALPHA dropout=$LORA_DROPOUT, constant LR=$TRAIN_LR"
-      _log "  vision tower frozen (removed from LoRA targets) ; modules_to_save=[action_out_proj] only"
-      _log "  action_loss_dim_weights disabled (canonical uniform MSE)"
+      _log "  vision tower LoRA + lm_expert + action projections; modules_to_save=[action_out_proj]"
+      _log "  action_loss_dim_weights=[1,1,1,1,1,1,16] (gripper × 16) — v4-w16 stronger Hole B push"
     else
       _log "fresh start from lerobot/smolvla_base (full fine-tune), constant LR=$TRAIN_LR"
     fi
@@ -273,10 +292,16 @@ while true; do
     | "$VENV_PY" "$REPO"/scripts/orchestrate/parse_train_log.py \
         --out "$STEP_JSONL" --epoch "$next_epoch" \
         > /dev/null
-  rc=${PIPESTATUS[0]}
+  # Capture every stage's exit code. We must check parse_train_log too:
+  # if it crashes mid-epoch the STEP_JSONL is left half-written and every
+  # downstream consumer (plot_metrics, budget_watchdog, eval-summary jq)
+  # silently sees corrupted data while the epoch counter advances.
+  rcs=("${PIPESTATUS[@]}")
+  rc_train=${rcs[0]}
+  rc_parse=${rcs[2]}
   set -e
-  if [[ $rc -ne 0 ]]; then
-    _log "epoch $next_epoch failed (rc=$rc); sleeping 30s and retrying (epoch NOT advanced)"
+  if [[ $rc_train -ne 0 || $rc_parse -ne 0 ]]; then
+    _log "epoch $next_epoch failed (train rc=$rc_train, parse rc=$rc_parse); sleeping 30s and retrying (epoch NOT advanced)"
     sleep 30
     continue
   fi

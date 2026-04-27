@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Budget watchdog for continual_train.sh.
+# Budget watchdog for the training orchestrator (train_only.sh).
 #
 # Touches $LOG_DIR/STOP when either:
 #   (a) elapsed wallclock >= BUDGET_HOURS (default 8h), OR

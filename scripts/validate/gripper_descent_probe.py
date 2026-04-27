@@ -42,26 +42,7 @@ def main() -> int:
     # Target orientation (top-down, yaw=0): (w, x, y, z) = (0, 1, 0, 0).
     q_target = torch.tensor([0.0, 1.0, 0.0, 0.0], device=device)
 
-    def _quat_mul(a, b):
-        aw, ax, ay, az = a.unbind(-1); bw, bx, by, bz = b.unbind(-1)
-        return torch.stack([aw*bw-ax*bx-ay*by-az*bz,
-                            aw*bx+ax*bw+ay*bz-az*by,
-                            aw*by-ax*bz+ay*bw+az*bx,
-                            aw*bz+ax*by-ay*bx+az*bw], dim=-1)
-
-    def _quat_conj(q):
-        w, x, y, z = q.unbind(-1)
-        return torch.stack([w, -x, -y, -z], dim=-1)
-
-    def _quat_err_axis_angle(q_cur, q_des):
-        q = _quat_mul(q_des, _quat_conj(q_cur))
-        if q[..., 0].item() < 0:
-            q = -q
-        w = q[..., 0].clamp(-1.0, 1.0)
-        angle = 2.0 * torch.acos(w)
-        sin_half = torch.sqrt((1.0 - w * w).clamp(min=1e-8))
-        axis = q[..., 1:] / sin_half
-        return axis * angle
+    from envs.quat_utils import quat_err_axis_angle
 
     obs_ref = [obs]
 
@@ -71,7 +52,7 @@ def main() -> int:
             ee = obs_ref[0]["policy"]["ee_pose"][0]
             pos_err = target_pos - ee[:3]
             pos_delta = torch.clamp(pos_err * 10.0, -1.0, 1.0)
-            rot_err = _quat_err_axis_angle(ee[3:7], q_target)
+            rot_err = quat_err_axis_angle(ee[3:7], q_target)
             rot_delta = torch.clamp(rot_err * 3.0, -1.0, 1.0)
             a = torch.zeros((1, 7), device=device)
             a[0, :3] = pos_delta; a[0, 3:6] = rot_delta; a[0, 6] = gripper

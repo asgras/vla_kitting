@@ -33,7 +33,7 @@ parser.add_argument("--checkpoint", type=str, required=True,
 parser.add_argument("--num_episodes", type=int, default=3)
 parser.add_argument("--max_steps", type=int, default=900)
 parser.add_argument("--task", type=str,
-                    default="pick up the cube and place it on the pink square")
+                    default="pick up the cube and place it on the magenta circle")
 parser.add_argument("--save_gif", type=str, default=None,
                     help="Optional: write a side-by-side gif here. "
                          "If the path contains '{ep}', one gif is saved per "
@@ -81,6 +81,10 @@ parser.add_argument("--use_rtc", action="store_true", default=False,
                          "attention mechanism is invoked inside "
                          "predict_action_chunk when rtc_config.enabled=True "
                          "in the saved policy config.")
+parser.add_argument("--action_log_csv", type=str, default=None,
+                    help="Optional: write per-step action vector + cube/EE "
+                         "pose to CSV. Useful for diagnosing which action "
+                         "dim (gripper vs pose) is failing in eval.")
 args_cli, _ = parser.parse_known_args()
 
 app_launcher = AppLauncher(headless=True, enable_cameras=True)
@@ -244,7 +248,24 @@ def main() -> int:
             obs_env = {"policy": env.unwrapped.observation_manager.compute()["policy"]}
 
         cube0 = obs_env["policy"]["cube_pos"][0].tolist()
-        _log(f"=== episode {ep} | cube at ({cube0[0]:.3f}, {cube0[1]:.3f}, {cube0[2]:.3f})")
+        # Pull the per-episode color word from env state; fall back to the
+        # explicit --task default if the env doesn't expose color (older
+        # configs). format_task_with_color handles the empty case cleanly.
+        from envs.mdp.cube_palette import color_name_for_idx, format_task_with_color
+        ep_color_state = (getattr(env.unwrapped, "cube_color_state", {}) or {}).get(0)
+        if ep_color_state is not None:
+            ep_color_name = ep_color_state[0]
+        elif "cube_color_idx" in obs_env["policy"]:
+            ep_color_name = color_name_for_idx(int(obs_env["policy"]["cube_color_idx"][0, 0].item()))
+        else:
+            ep_color_name = ""
+        # If the user passed an explicit --task we honor it; otherwise we
+        # synthesize per-episode prompts from the cube color so the eval
+        # statistic matches the training prompt distribution.
+        explicit_task = args_cli.task != parser.get_default("task")
+        ep_task = args_cli.task if explicit_task else format_task_with_color(ep_color_name)
+        _log(f"=== episode {ep} | cube at ({cube0[0]:.3f}, {cube0[1]:.3f}, {cube0[2]:.3f}) "
+             f"color={ep_color_name!r} task={ep_task!r}")
 
         success_this_ep = False
         truncated_this_ep = False
@@ -263,7 +284,7 @@ def main() -> int:
                 drop_cube_pos=args_cli.drop_cube_pos,
             )
             frame = prepare_observation_for_inference(
-                observation=raw, device=device, task=args_cli.task, robot_type="yaskawa_hc10dt_robotiq_2f85"
+                observation=raw, device=device, task=ep_task, robot_type="yaskawa_hc10dt_robotiq_2f85"
             )
             batch = preprocess(frame)
 
@@ -303,6 +324,25 @@ def main() -> int:
                     -torch.ones_like(action[:, 6]),
                 )
 
+            # Optional: log raw action vector + cube/EE pose to CSV.
+            if args_cli.action_log_csv:
+                csv_path = pathlib.Path(args_cli.action_log_csv)
+                csv_path.parent.mkdir(parents=True, exist_ok=True)
+                a = action[0].detach().cpu().tolist()
+                cube_pos = obs_env["policy"]["cube_pos"][0].detach().cpu().tolist()
+                ee = obs_env["policy"]["ee_pose"][0].detach().cpu().tolist()
+                if not csv_path.exists():
+                    csv_path.write_text(
+                        "ep,step,a0,a1,a2,a3,a4,a5,a6,cube_x,cube_y,cube_z,ee_x,ee_y,ee_z\n"
+                    )
+                with csv_path.open("a") as f:
+                    f.write(
+                        f"{ep},{step},"
+                        + ",".join(f"{v:.4f}" for v in a)
+                        + f",{cube_pos[0]:.4f},{cube_pos[1]:.4f},{cube_pos[2]:.4f}"
+                        + f",{ee[0]:.4f},{ee[1]:.4f},{ee[2]:.4f}\n"
+                    )
+
             obs_env, reward, terminated, truncated, info = env.step(action)
 
             # Collect frames for gif (first episode only unless template uses {ep}).
@@ -310,7 +350,10 @@ def main() -> int:
                 wrist = obs_env["policy"]["wrist_cam"][0].detach().cpu().numpy().astype(np.uint8)
                 third = obs_env["policy"]["third_person_cam"][0].detach().cpu().numpy().astype(np.uint8)
                 from PIL import Image
-                wrist_up = np.array(Image.fromarray(wrist).resize((256, 256), Image.NEAREST))
+                # Resize wrist to third's height so an hstack lines up at any
+                # camera resolution (env cfg can change without breaking gifs).
+                Ht = third.shape[0]
+                wrist_up = np.array(Image.fromarray(wrist).resize((Ht, Ht), Image.NEAREST))
                 gif_frames.append(np.concatenate([wrist_up, third], axis=1))
 
             if bool(terminated[0]) and not bool(truncated[0]):
@@ -337,6 +380,8 @@ def main() -> int:
                 "steps": step + 1,
                 "cube_start": [float(x) for x in cube0],
                 "cube_end": [float(x) for x in cube_end],
+                "cube_color": ep_color_name,
+                "task": ep_task,
             })
 
         if args_cli.save_gif and gif_frames and (per_episode_gif or (ep == 0 and not saved_gif)):
