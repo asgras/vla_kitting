@@ -1,0 +1,95 @@
+{
+  "manifest_schema_version": 1,
+  "type": "dataset",
+  "dataset_id": "cube_pick_v3_scripted_20260425_011050",
+  "dataset_path": "datasets/lerobot/cube_pick_v3_scripted_20260425_011050",
+  "created_at": "2026-04-25T03:04:48.857348+00:00",
+  "host": "ip-172-16-1-186",
+  "user": "ubuntu",
+  "lerobot": {
+    "codebase_version": "v3.0",
+    "robot_type": "yaskawa_hc10dt_robotiq_2f85",
+    "total_episodes": 370,
+    "total_frames": 307866,
+    "fps": 30,
+    "splits": {
+      "train": "0:370"
+    },
+    "video_path_template": null,
+    "data_path_template": "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet"
+  },
+  "obs_features": [
+    "observation.ee_pose",
+    "observation.images.third_person",
+    "observation.images.wrist",
+    "observation.state"
+  ],
+  "action_dim": 7,
+  "action_names": [
+    "ee_dx",
+    "ee_dy",
+    "ee_dz",
+    "ee_drx",
+    "ee_dry",
+    "ee_drz",
+    "gripper"
+  ],
+  "action_per_dim": {
+    "ee_dx": {
+      "min": -0.030263662338256836,
+      "max": 0.298580527305603,
+      "mean": 0.015275259657452503,
+      "std": 0.04419977153814536
+    },
+    "ee_dy": {
+      "min": -0.18650710582733154,
+      "max": 0.05039893090724945,
+      "mean": 0.0009611990244930013,
+      "std": 0.02393432169279824
+    },
+    "ee_dz": {
+      "min": -0.13064265251159668,
+      "max": 0.0934910774230957,
+      "mean": -0.013618020271846361,
+      "std": 0.045378240640763914
+    },
+    "ee_drx": {
+      "min": -0.015287470072507858,
+      "max": 0.011081923730671406,
+      "mean": -0.0005424639096789628,
+      "std": 0.0015810451874735355
+    },
+    "ee_dry": {
+      "min": -0.014491893351078033,
+      "max": 1.0,
+      "mean": 0.022444975954632972,
+      "std": 0.13356533744271798
+    },
+    "ee_drz": {
+      "min": -0.24390241503715515,
+      "max": 0.09153740853071213,
+      "mean": -0.0002148741714926459,
+      "std": 0.00675511560392439
+    },
+    "gripper": {
+      "min": -1.0,
+      "max": 1.0,
+      "mean": -0.47824053941128597,
+      "std": 0.8782288996837864,
+      "close_fraction": null
+    }
+  },
+  "env_cfg": {
+    "env_cfg_path": "envs/yaskawa_pick_cube_cfg.py",
+    "env_cfg_sha": "dccee6ecd817656ad4ceda4ab911cfa61ef11b5f",
+    "decimation": "4",
+    "scale": "0.1",
+    "antialiasing_mode": "FXAA"
+  },
+  "scripted_controller": {
+    "path": "scripts/validate/scripted_pick_demo.py",
+    "sha": "75b6f4a12451294521d0dd077b93e3371e9288e3"
+  },
+  "git_head_at_build": "75b6f4a12451294521d0dd077b93e3371e9288e3",
+  "notes": null
+}
