@@ -118,13 +118,13 @@ bd close <id>         # Complete work
 1. **Run quality gates.** If code changed, run the relevant tests and linters for the area you touched. Note results (pass/fail, which suite) in the bd issue's `--notes` or in the run's report entry. If a gate fails, fix it before proceeding — do not paper over with skips or `--no-verify`.
 2. **File any remaining discovered work as bd issues.** Anything you noticed mid-run that's out of scope — a flaky test, a TODO you couldn't address, a follow-up experiment, a stale doc — gets a `bd create` *now*, with priority and a one-line description. Add `bd dep add` if it's blocked by something. Lost context = lost work.
 3. **Close finished bd issues.** `bd close <id>` for the issue you just finished, plus any other issues this work resolved. Use `bd close <id1> <id2> ...` for multiples. If closing leaves something in a partial state, update the issue with `--notes` first, then close with `--reason`.
-4. **Pull, sync, and push to remote.** This sequence is mandatory and must succeed:
+4. **Pull, sync, and push to remote.** This sequence is mandatory and must succeed. The current working branch (`vla-pipeline-v1`) tracks `origin/main` as its upstream, but the branch names differ — so plain `git push` is rejected by git's safety check. Use the explicit refspec form:
    ```bash
-   git pull --rebase
-   bd dolt pull
-   bd dolt push
-   git push
-   git status  # MUST show "up to date with origin"
+   git pull --rebase            # pulls from upstream (origin/main)
+   bd dolt pull                  # OK if "no remote" — beads sync is local-only here
+   bd dolt push                  # OK if "no remote"
+   git push origin HEAD:main     # push current HEAD to origin/main (NOT plain `git push`)
+   git status                    # MUST show "up to date with 'origin/main'"
    ```
    If push fails (rejected, conflicts, hook errors), resolve the root cause and retry. Do not stop with work stranded locally. Do not bypass hooks.
 5. **Generate a handoff prompt for the next session.** After the issue is closed and pushed, emit a short handoff block as the *last* thing in your final reply for that issue. Format:
